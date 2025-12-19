@@ -13,6 +13,7 @@ interface RenderOptions {
   pipes: PipeSegment[];
   pipeCoords: Map<string, ResolvedCoordinates>;
   selectedId: string;
+  hoveredId: string | null;
   isMeasureMode: boolean;
   measurePoints: Vector2D[];
   mousePos: Vector2D;
@@ -20,7 +21,7 @@ interface RenderOptions {
 
 export const renderScene = ({
   ctx, width, height, offset, scale, isExport,
-  pipes, pipeCoords, selectedId, isMeasureMode, measurePoints, mousePos
+  pipes, pipeCoords, selectedId, hoveredId, isMeasureMode, measurePoints, mousePos
 }: RenderOptions) => {
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = isExport ? '#ffffff' : '#f8fafc';
@@ -66,6 +67,8 @@ export const renderScene = ({
     const coords = pipeCoords.get(pipe.id);
     if (!coords) return;
     const isSelected = !isExport && selectedId === pipe.id;
+    const isHovered = !isExport && hoveredId === pipe.id;
+    
     const sizePx = (CONFIG.SIZES[pipe.size as keyof typeof CONFIG.SIZES] || 2);
     const color = (CONFIG.SIZE_COLORS[pipe.size as keyof typeof CONFIG.SIZE_COLORS] || CONFIG.COLORS.PIPE);
 
@@ -73,8 +76,18 @@ export const renderScene = ({
       ctx.beginPath();
       ctx.moveTo(coords.startX, coords.startY);
       ctx.lineTo(coords.endX, coords.endY);
-      ctx.strokeStyle = isSelected ? CONFIG.COLORS.SELECTED : color;
-      ctx.lineWidth = (isSelected ? sizePx + 2 : sizePx) / scale;
+      
+      if (isSelected) {
+        ctx.strokeStyle = CONFIG.COLORS.SELECTED;
+        ctx.lineWidth = (sizePx + 3) / scale;
+      } else if (isHovered) {
+        ctx.strokeStyle = '#60a5fa'; // Light blue for hover
+        ctx.lineWidth = (sizePx + 4) / scale;
+      } else {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = sizePx / scale;
+      }
+
       ctx.lineCap = 'round';
       if (pipe.installationType === 'UNDER') ctx.setLineDash([5/scale, 5/scale]);
       else ctx.setLineDash([]);
@@ -86,7 +99,7 @@ export const renderScene = ({
       if (pipe.direction === 'UP' || pipe.direction === 'DOWN') { ox = 35 / scale; oy = 0; }
       
       ctx.save();
-      ctx.fillStyle = isSelected ? CONFIG.COLORS.SELECTED : CONFIG.COLORS.LABEL;
+      ctx.fillStyle = isSelected ? CONFIG.COLORS.SELECTED : isHovered ? '#2563eb' : CONFIG.COLORS.LABEL;
       ctx.font = `bold ${11 / scale}px Vazirmatn`;
       ctx.textAlign = 'center';
       ctx.shadowColor = 'white'; ctx.shadowBlur = 4/scale;
@@ -127,8 +140,9 @@ export const renderScene = ({
       pipes.forEach(p => {
           const c = pipeCoords.get(p.id);
           if (c) {
-              ctx.beginPath(); ctx.arc(c.endX, c.endY, 4/scale, 0, Math.PI*2);
-              ctx.fillStyle = selectedId === p.id ? CONFIG.COLORS.SELECTED : '#fff';
+              const isActive = selectedId === p.id || hoveredId === p.id;
+              ctx.beginPath(); ctx.arc(c.endX, c.endY, (isActive ? 5 : 4)/scale, 0, Math.PI*2);
+              ctx.fillStyle = selectedId === p.id ? CONFIG.COLORS.SELECTED : hoveredId === p.id ? '#60a5fa' : '#fff';
               ctx.strokeStyle = CONFIG.COLORS.SELECTED;
               ctx.lineWidth = 1.5/scale;
               ctx.fill(); ctx.stroke();

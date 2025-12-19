@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
-  Plus, ZoomIn, ZoomOut, Move, Target, Ruler, Printer, X, ShieldCheck, Calculator, Undo2, Redo2, Layers, Save, Upload, Loader2
+  Plus, ZoomIn, ZoomOut, Move, Target, Ruler, Printer, X, ShieldCheck, Calculator, Undo2, Redo2, Layers, Save, Upload, Loader2, Info, ChevronLeft, CheckCircle
 } from 'lucide-react';
 import { Direction, FittingType, InstallationType, Vector2D } from '../domain/types';
 import { CONFIG } from '../domain/constants';
@@ -12,6 +12,7 @@ import { renderScene } from '../canvas/SceneRenderer';
 
 type PaperSize = 'A4' | 'A3';
 type Orientation = 'PORTRAIT' | 'LANDSCAPE';
+type SidebarTab = 'DRAW' | 'MEASURE' | 'ANALYZE' | 'EXPORT';
 
 const App: React.FC = () => {
   // Modular State
@@ -21,11 +22,13 @@ const App: React.FC = () => {
   } = usePipesState();
 
   // UI Local State
+  const [activeTab, setActiveTab] = useState<SidebarTab>('DRAW');
   const [viewOffset, setViewOffset] = useState<Vector2D>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState<number>(1.2);
   const [isMeasureMode, setIsMeasureMode] = useState<boolean>(false);
   const [measurePoints, setMeasurePoints] = useState<Vector2D[]>([]);
   const [mousePos, setMousePos] = useState<Vector2D>({ x: 0, y: 0 });
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
   
@@ -33,6 +36,7 @@ const App: React.FC = () => {
   const [aiResponse, setAiResponse] = useState("");
   const [showAiModal, setShowAiModal] = useState(false);
   const [modalMode, setModalMode] = useState<'SAFETY' | 'MTO'>('SAFETY');
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const [showPrintPreview, setShowPrintPreview] = useState(false);
   const [paperSize, setPaperSize] = useState<PaperSize>('A4');
@@ -96,6 +100,11 @@ const App: React.FC = () => {
     }));
   };
 
+  const showStatus = (msg: string) => {
+    setStatusMessage(msg);
+    setTimeout(() => setStatusMessage(null), 3000);
+  };
+
   const handleAiAnalysis = async (mode: 'SAFETY' | 'MTO') => {
     setAiLoading(true);
     setModalMode(mode);
@@ -145,9 +154,9 @@ const App: React.FC = () => {
     ctx.scale(dpr, dpr);
     renderScene({
       ctx, width: w, height: h, offset: viewOffset, scale: zoom, isExport: false,
-      pipes, pipeCoords, selectedId, isMeasureMode, measurePoints, mousePos
+      pipes, pipeCoords, selectedId, hoveredId, isMeasureMode, measurePoints, mousePos
     });
-  }, [viewOffset, zoom, pipes, pipeCoords, selectedId, isMeasureMode, measurePoints, mousePos]);
+  }, [viewOffset, zoom, pipes, pipeCoords, selectedId, hoveredId, isMeasureMode, measurePoints, mousePos]);
 
   useEffect(() => {
     const frameId = requestAnimationFrame(mainDraw);
@@ -175,7 +184,7 @@ const App: React.FC = () => {
             const centerY = cvs.height / 2 - (box.minY + box.height / 2) * fitScale;
             renderScene({
               ctx, width: cvs.width, height: cvs.height, offset: { x: centerX, y: centerY }, scale: fitScale, isExport: true,
-              pipes, pipeCoords, selectedId, isMeasureMode: false, measurePoints: [], mousePos: {x:0,y:0}
+              pipes, pipeCoords, selectedId, hoveredId: null, isMeasureMode: false, measurePoints: [], mousePos: {x:0,y:0}
             });
         }
     }
@@ -218,20 +227,41 @@ const App: React.FC = () => {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     setMousePos({ x, y });
+
     if (isDragging) {
         setViewOffset(v => ({ x: v.x + (e.clientX - lastMousePos.x), y: v.y + (e.clientY - lastMousePos.y) }));
         setLastMousePos({ x: e.clientX, y: e.clientY });
+        return;
     }
+
+    // Hover Highlight Logic
+    const worldX = (x - viewOffset.x) / zoom;
+    const worldY = (y - viewOffset.y) / zoom;
+    let newHoveredId = null;
+    let minD = 15 / zoom;
+
+    for (const [id, c] of pipeCoords.entries()) {
+      const d = getDistanceToSegment(worldX, worldY, c.startX, c.startY, c.endX, c.endY);
+      if (d < minD) {
+        minD = d;
+        newHoveredId = id;
+      }
+    }
+    setHoveredId(newHoveredId);
   };
 
   const onAddPipe = () => {
     addPipe({ id: Math.random().toString(36).substr(2, 9), parentId: selectedId, ...form });
+    showStatus("این لوله به نقشه اضافه شد ✔");
     if (form.fitting !== 'NONE') {
         setForm(f => ({ ...f, fitting: 'NONE', length: 100 }));
     }
   };
 
-  const onUpdatePipe = () => updatePipe(selectedId, form);
+  const onUpdatePipe = () => {
+    updatePipe(selectedId, form);
+    showStatus("تغییرات بخش ذخیره شد ✔");
+  };
 
   return (
     <div className="flex h-screen w-full bg-slate-50 text-slate-800 overflow-hidden" dir="rtl">
@@ -244,115 +274,199 @@ const App: React.FC = () => {
               if (data.pipes) { commitToHistory(); setPipes(data.pipes); }
               else if (Array.isArray(data)) { commitToHistory(); setPipes(data); }
               setSelectedId('ROOT');
+              showStatus("فایل پروژه بارگذاری شد");
             } catch(e) { alert("خطا در خواندن فایل"); }
           };
           reader.readAsText(file);
       }} className="hidden" />
 
       {/* Sidebar UI */}
-      <aside className="w-64 bg-white border-l border-slate-200 shadow-2xl z-30 flex flex-col h-full shrink-0">
-        <header className="p-3 border-b bg-slate-50/50 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-1 bg-blue-600 rounded text-white shadow-sm"><Layers size={14} /></div>
-            <h1 className="text-xs font-bold tracking-tight truncate">ایزو نگار (IsoNegar)</h1>
+      <aside className="w-80 bg-white border-l border-slate-200 shadow-2xl z-30 flex flex-col h-full shrink-0">
+        <header className="p-4 border-b bg-slate-50/50">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-blue-600 rounded-lg text-white shadow-sm"><Layers size={18} /></div>
+              <h1 className="text-sm font-bold tracking-tight truncate">ایزو نگار (IsoNegar)</h1>
+            </div>
+            <div className="flex gap-1.5">
+              <button onClick={undo} disabled={history.length === 0} className={`p-1.5 rounded-lg transition-all border ${history.length > 0 ? 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200 shadow-sm' : 'text-slate-200 border-slate-100 cursor-not-allowed'}`} title="Undo"><Undo2 size={16} /></button>
+              <button onClick={redo} disabled={redoStack.length === 0} className={`p-1.5 rounded-lg transition-all border ${redoStack.length > 0 ? 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200 shadow-sm' : 'text-slate-200 border-slate-100 cursor-not-allowed'}`} title="Redo"><Redo2 size={16} /></button>
+            </div>
           </div>
-          <div className="flex gap-1">
-            <button onClick={undo} disabled={history.length === 0} className={`p-1 rounded transition-all border ${history.length > 0 ? 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200 shadow-sm' : 'text-slate-200 border-slate-100 cursor-not-allowed'}`} title="Undo"><Undo2 size={14} /></button>
-            <button onClick={redo} disabled={redoStack.length === 0} className={`p-1 rounded transition-all border ${redoStack.length > 0 ? 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200 shadow-sm' : 'text-slate-200 border-slate-100 cursor-not-allowed'}`} title="Redo"><Redo2 size={14} /></button>
+
+          {/* Step-by-Step Guide */}
+          <div className="bg-blue-50/80 rounded-xl p-3 border border-blue-100 mb-2">
+            <div className="flex items-center gap-1.5 text-blue-800 text-[10px] font-bold mb-2">
+              <Info size={12} /> راهنمای گام‌به‌گام
+            </div>
+            <ul className="space-y-1.5 text-[9px] text-blue-700/80 font-medium">
+              <li className={`flex items-center gap-2 ${pipes.length === 0 ? 'text-blue-900 font-bold' : ''}`}>
+                <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0">۱</span>
+                نقطه شروع را روی صفحه انتخاب کن
+              </li>
+              <li className={`flex items-center gap-2 ${pipes.length > 0 && selectedId !== 'ROOT' ? 'text-blue-900 font-bold' : ''}`}>
+                <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0">۲</span>
+                جهت و طول لوله را تنظیم کن
+              </li>
+              <li className={`flex items-center gap-2 ${pipes.length > 0 ? 'text-blue-900 font-bold' : ''}`}>
+                <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0">۳</span>
+                دکمه «افزودن به نقشه» را بزن
+              </li>
+            </ul>
+          </div>
+
+          {/* Sidebar Tabs */}
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-xl mt-4">
+            <button onClick={() => setActiveTab('DRAW')} className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${activeTab === 'DRAW' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>ترسیم</button>
+            <button onClick={() => setActiveTab('MEASURE')} className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${activeTab === 'MEASURE' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>اندازه‌گیری</button>
+            <button onClick={() => setActiveTab('ANALYZE')} className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${activeTab === 'ANALYZE' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>تحلیل</button>
+            <button onClick={() => setActiveTab('EXPORT')} className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${activeTab === 'EXPORT' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>خروجی</button>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-3 space-y-4 scrollbar-hide">
-          <div className="p-2 bg-blue-50/50 border border-blue-100 rounded-lg">
-            <label className="text-[8px] font-bold text-slate-400 flex items-center gap-1 uppercase tracking-widest"><Target size={10} /> انتخاب شده</label>
-            <div className="text-[10px] font-bold text-blue-900 truncate mt-0.5">{selectedId === 'ROOT' ? 'نقطه شروع' : `انشعاب ${selectedId.slice(0, 4)}`}</div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500">جهت ترسیم</label>
-              <select className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-[10px] outline-none" value={form.direction} onChange={e => setForm({...form, direction: e.target.value as Direction})}>
-                <option value="NORTH">شمال</option><option value="SOUTH">جنوب</option><option value="EAST">شرق</option><option value="WEST">غرب</option><option value="UP">بالا</option><option value="DOWN">پایین</option>
-              </select>
-            </div>
-            
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500">طول لوله (CM)</label>
-              <input type="number" className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-[10px] outline-none" value={form.length} onChange={e => setForm({...form, length: Number(e.target.value)})} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500">سایز</label>
-                <select className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-[10px] outline-none" value={form.size} onChange={e => setForm({...form, size: e.target.value})}>
-                  {Object.keys(CONFIG.SIZES).map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+        <div className="flex-1 overflow-y-auto p-4 space-y-5 scrollbar-hide">
+          {activeTab === 'DRAW' && (
+            <>
+              <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
+                <label className="text-[8px] font-bold text-slate-400 flex items-center gap-1 uppercase tracking-widest"><Target size={10} /> المان فعال</label>
+                <div className="text-[11px] font-bold text-blue-900 truncate mt-1">
+                  {selectedId === 'ROOT' ? 'نقطه شروع (شیر اصلی)' : `انشعاب ${selectedId.slice(0, 4)}`}
+                </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500">اجرا</label>
-                <select className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-[10px] outline-none" value={form.installationType} onChange={e => setForm({...form, installationType: e.target.value as InstallationType})}>
-                  <option value="ABOVE">روکار</option><option value="UNDER">زیرکار</option>
-                </select>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500">جهت ترسیم بعدی</label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {['NORTH', 'SOUTH', 'EAST', 'WEST', 'UP', 'DOWN'].map((d) => (
+                      <button 
+                        key={d} 
+                        onClick={() => setForm({...form, direction: d as Direction})} 
+                        className={`py-2 px-1 text-[9px] font-bold rounded-lg border transition-all ${form.direction === d ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+                      >
+                        {d === 'NORTH' ? 'شمال' : d === 'SOUTH' ? 'جنوب' : d === 'EAST' ? 'شرق' : d === 'WEST' ? 'غرب' : d === 'UP' ? 'بالا' : 'پایین'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500">طول لوله (سانتی‌متر)</label>
+                  <input type="number" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-bold outline-none focus:ring-2 focus:ring-blue-500/20 transition-all" value={form.length} onChange={e => setForm({...form, length: Number(e.target.value)})} />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500">سایز لوله</label>
+                    <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-bold outline-none" value={form.size} onChange={e => setForm({...form, size: e.target.value})}>
+                      {Object.keys(CONFIG.SIZES).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500">نوع اجرا</label>
+                    <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-bold outline-none" value={form.installationType} onChange={e => setForm({...form, installationType: e.target.value as InstallationType})}>
+                      <option value="ABOVE">روکار</option><option value="UNDER">زیرکار</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500">تجهیز و المان نهایی</label>
+                  <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-bold outline-none" value={form.fitting} onChange={e => handleFittingChange(e.target.value as FittingType)}>
+                    <option value="NONE">بدون تجهیز (زانو)</option>
+                    <optgroup label="شیرآلات">
+                      <option value="VALVE_MAIN">شیر اصلی</option>
+                      <option value="VALVE_GC">شیر اجاق گاز</option>
+                      <option value="VALVE_PC">شیر پکیج</option>
+                      <option value="VALVE_WH">شیر آبگرمکن</option>
+                      <option value="VALVE_RC">شیر روشنایی</option>
+                      <option value="VALVE_H">شیر بخاری</option>
+                      <option value="VALVE">شیر عمومی</option>
+                    </optgroup>
+                    <optgroup label="تجهیزات">
+                      <option value="METER">کنتور</option>
+                      <option value="REGULATOR">رگولاتور</option>
+                    </optgroup>
+                    <optgroup label="اتصالات">
+                      <option value="TEE">سه‌راهی (Tee)</option>
+                      <option value="ELBOW45">زانو ۴۵ درجه</option>
+                      <option value="COUPLING">بوشن</option>
+                      <option value="NIPPLE">مغزی</option>
+                      <option value="UNION">مهره ماسوره</option>
+                      <option value="REDUCER">تبدیل</option>
+                      <option value="CAP">درپوش</option>
+                      <option value="FLANGE">فلنج</option>
+                    </optgroup>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-3 pt-2">
+                  {selectedId !== 'ROOT' && (
+                    <button onClick={onUpdatePipe} className="w-full py-2.5 bg-slate-800 text-white rounded-xl text-[11px] font-bold shadow-sm active:scale-95 transition-all hover:bg-black">ذخیره تغییرات بخش</button>
+                  )}
+                  <button onClick={onAddPipe} className="w-full py-4 bg-blue-600 text-white rounded-xl text-[11px] font-bold shadow-lg hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-2">
+                    <Plus size={16} /> افزودن به نقشه ✔
+                  </button>
+                  {selectedId !== 'ROOT' && (
+                    <button onClick={() => deletePipe(selectedId)} className="w-full py-2 text-red-500 font-bold text-[10px] hover:bg-red-50 rounded-xl transition-all">حذف این انشعاب</button>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'MEASURE' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-amber-50 border border-amber-100 rounded-xl">
+                <p className="text-[10px] text-amber-800 leading-relaxed font-medium">ابزار اندازه‌گیری آزاد به شما اجازه می‌دهد فاصله بین هر دو نقطه دلخواه در نقشه را محاسبه کنید.</p>
+              </div>
+              <button onClick={() => { setIsMeasureMode(!isMeasureMode); setMeasurePoints([]); }} className={`w-full py-4 rounded-xl text-[11px] font-bold shadow-md transition-all flex items-center justify-center gap-2 ${isMeasureMode ? 'bg-amber-500 text-white animate-pulse' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                <Ruler size={18} /> {isMeasureMode ? 'در حال اندازه‌گیری...' : 'فعال‌سازی خط‌کش آزاد'}
+              </button>
+              {measurePoints.length > 0 && (
+                <button onClick={() => setMeasurePoints([])} className="w-full py-2 text-slate-500 text-[10px] font-bold hover:text-slate-800 transition-colors">پاک کردن نقاط اندازه‌گیری</button>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'ANALYZE' && (
+            <div className="space-y-3">
+              <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl mb-2">
+                <p className="text-[10px] text-emerald-800 leading-relaxed font-medium">هوش مصنوعی Gemini نقشه شما را از نظر استانداردهای ایمنی و مهندسی بررسی می‌کند.</p>
+              </div>
+              <button onClick={() => handleAiAnalysis('SAFETY')} className="w-full py-4 bg-white border border-emerald-100 text-emerald-700 rounded-xl flex flex-col items-center gap-2 text-[11px] font-bold hover:bg-emerald-50 transition-all shadow-sm">
+                <ShieldCheck size={24} /> بررسی استانداردهای ایمنی
+              </button>
+              <button onClick={() => handleAiAnalysis('MTO')} className="w-full py-4 bg-white border border-blue-100 text-blue-700 rounded-xl flex flex-col items-center gap-2 text-[11px] font-bold hover:bg-blue-50 transition-all shadow-sm">
+                <Calculator size={24} /> استخراج متره و برآورد (MTO)
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'EXPORT' && (
+            <div className="space-y-3">
+              <button onClick={() => setShowPrintPreview(true)} className="w-full bg-blue-900 text-white py-4 rounded-xl text-[11px] font-bold flex items-center justify-center gap-2 shadow-xl hover:bg-black transition-all active:scale-95">
+                <Printer size={18} /> آماده‌سازی خروجی نهایی نقشه
+              </button>
+              <div className="grid grid-cols-2 gap-2 mt-4">
+                <button onClick={() => {
+                  const blob = new Blob([JSON.stringify({ pipes })], {type: 'application/json'});
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a'); a.href = url; a.download = 'gas_iso_project.json'; a.click();
+                  showStatus("پروژه ذخیره شد");
+                }} className="py-3 bg-white border border-slate-200 text-slate-600 rounded-xl text-[10px] font-bold flex items-center justify-center gap-2 hover:bg-slate-50 transition-all">
+                  <Save size={16} /> ذخیره پروژه
+                </button>
+                <button onClick={() => fileInputRef.current?.click()} className="py-3 bg-white border border-slate-200 text-slate-600 rounded-xl text-[10px] font-bold flex items-center justify-center gap-2 hover:bg-slate-50 transition-all">
+                  <Upload size={16} /> فراخوانی فایل
+                </button>
               </div>
             </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500">تجهیز و المان</label>
-              <select className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-[10px] outline-none" value={form.fitting} onChange={e => handleFittingChange(e.target.value as FittingType)}>
-                <option value="NONE">بدون تجهیز (زانو)</option>
-                <optgroup label="شیرآلات">
-                  <option value="VALVE_MAIN">شیر اصلی</option>
-                  <option value="VALVE_GC">شیر اجاق گاز</option>
-                  <option value="VALVE_PC">شیر پکیج</option>
-                  <option value="VALVE_WH">شیر آبگرمکن</option>
-                  <option value="VALVE_RC">شیر روشنایی</option>
-                  <option value="VALVE_H">شیر بخاری</option>
-                  <option value="VALVE">شیر عمومی</option>
-                </optgroup>
-                <optgroup label="تجهیزات">
-                  <option value="METER">کنتور</option>
-                  <option value="REGULATOR">رگولاتور</option>
-                </optgroup>
-                <optgroup label="اتصالات">
-                  <option value="TEE">سه‌راهی (Tee)</option>
-                  <option value="ELBOW45">زانو ۴۵ درجه</option>
-                  <option value="COUPLING">بوشن</option>
-                  <option value="NIPPLE">مغزی</option>
-                  <option value="UNION">مهره ماسوره</option>
-                  <option value="REDUCER">تبدیل</option>
-                  <option value="CAP">درپوش</option>
-                  <option value="FLANGE">فلنج</option>
-                </optgroup>
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-2 pt-1">
-              {selectedId !== 'ROOT' && (
-                <button onClick={onUpdatePipe} className="w-full py-2 bg-slate-800 text-white rounded text-[10px] font-bold shadow-sm active:scale-95 transition-all">بروزرسانی تغییرات</button>
-              )}
-              <button onClick={onAddPipe} className="w-full py-3 bg-blue-600 text-white rounded text-[10px] font-bold shadow-md hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-1"><Plus size={14} /> {form.fitting !== 'NONE' ? 'ثبت تجهیز' : 'ثبت انشعاب'}</button>
-              {selectedId !== 'ROOT' && (
-                <button onClick={() => deletePipe(selectedId)} className="w-full py-1 text-red-500 font-bold text-[9px] hover:bg-red-50 rounded transition-all">حذف این بخش</button>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 pt-2 border-t mt-2">
-              <button onClick={() => handleAiAnalysis('SAFETY')} className="p-1.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-100 flex flex-col items-center gap-1 text-[9px] font-bold hover:bg-emerald-100 transition-all"><ShieldCheck size={14} />تحلیل ایمنی</button>
-              <button onClick={() => handleAiAnalysis('MTO')} className="p-1.5 bg-blue-50 text-blue-700 rounded border border-blue-100 flex flex-col items-center gap-1 text-[9px] font-bold hover:bg-blue-100 transition-all"><Calculator size={14} />متره و برآورد</button>
-            </div>
-          </div>
+          )}
         </div>
 
-        <footer className="p-3 border-t bg-slate-50/80 space-y-2">
-          <button onClick={() => setShowPrintPreview(true)} className="w-full bg-blue-900 text-white py-2.5 rounded text-[10px] font-bold flex items-center justify-center gap-1 shadow hover:bg-black transition-all"><Printer size={14} /> خروجی نقشه نهایی</button>
-          <div className="grid grid-cols-2 gap-1.5">
-            <button onClick={() => {
-              const blob = new Blob([JSON.stringify({ pipes })], {type: 'application/json'});
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a'); a.href = url; a.download = 'gas_iso_project.json'; a.click();
-            }} className="py-1.5 bg-white border border-slate-200 text-slate-600 rounded text-[9px] font-bold flex items-center justify-center gap-1 hover:bg-slate-50"><Save size={12} /> ذخیره</button>
-            <button onClick={() => fileInputRef.current?.click()} className="py-1.5 bg-white border border-slate-200 text-slate-600 rounded text-[9px] font-bold flex items-center justify-center gap-1 hover:bg-slate-50"><Upload size={12} /> باز کردن</button>
-          </div>
+        <footer className="p-4 border-t bg-slate-50/80 flex items-center justify-center">
+          <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Powered by IsoNegar Engine</p>
         </footer>
       </aside>
 
@@ -362,30 +476,43 @@ const App: React.FC = () => {
         onMouseMove={handleMouseMove}
         onMouseUp={() => setIsDragging(false)}
       >
-        <canvas ref={canvasRef} onClick={handleCanvasClick} className={`block w-full h-full ${isMeasureMode ? 'cursor-none' : 'cursor-default'}`} />
+        <canvas 
+          ref={canvasRef} 
+          onClick={handleCanvasClick} 
+          className={`block w-full h-full ${isMeasureMode ? 'cursor-none' : hoveredId ? 'cursor-pointer' : 'cursor-default'}`} 
+        />
+
+        {/* Status Feedback Toast */}
+        {statusMessage && (
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-2 rounded-full text-[11px] font-bold shadow-2xl z-[1000] flex items-center gap-2 animate-in fade-in slide-in-from-top-4 duration-300">
+             <CheckCircle size={14} className="text-emerald-400" />
+             {statusMessage}
+          </div>
+        )}
 
         <div className="absolute top-4 left-4 flex flex-col gap-2">
-          <div className="bg-white/90 backdrop-blur border border-slate-200 p-1 rounded shadow-xl flex flex-col gap-1">
-            <button onClick={() => handleZoom(1.2)} className="p-1.5 hover:bg-blue-50 text-slate-600 rounded"><ZoomIn size={18} /></button>
-            <button onClick={() => { if (containerRef.current) setViewOffset({ x: containerRef.current.clientWidth/2, y: containerRef.current.clientHeight/2 }); }} className="p-1.5 hover:bg-blue-50 text-slate-600 rounded" title="Reset View"><Move size={18} /></button>
-            <button onClick={() => handleZoom(0.8)} className="p-1.5 hover:bg-blue-50 text-slate-600 rounded"><ZoomOut size={18} /></button>
-            <div className="h-px bg-slate-200 my-0.5 mx-1" />
-            <button onClick={() => { setIsMeasureMode(!isMeasureMode); setMeasurePoints([]); }} className={`p-1.5 rounded transition-all ${isMeasureMode ? 'bg-amber-500 text-white shadow-lg' : 'hover:bg-amber-50 text-slate-600'}`} title="اندازه‌گیری"><Ruler size={18} /></button>
+          <div className="bg-white/90 backdrop-blur border border-slate-200 p-1 rounded-xl shadow-xl flex flex-col gap-1">
+            <button onClick={() => handleZoom(1.2)} className="p-2 hover:bg-blue-50 text-slate-600 rounded-lg transition-colors"><ZoomIn size={20} /></button>
+            <button onClick={() => { if (containerRef.current) setViewOffset({ x: containerRef.current.clientWidth/2, y: containerRef.current.clientHeight/2 }); }} className="p-2 hover:bg-blue-50 text-slate-600 rounded-lg transition-colors" title="Reset View"><Move size={20} /></button>
+            <button onClick={() => handleZoom(0.8)} className="p-2 hover:bg-blue-50 text-slate-600 rounded-lg transition-colors"><ZoomOut size={20} /></button>
           </div>
         </div>
 
         {pipes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="bg-white/70 backdrop-blur-sm p-6 rounded-[2rem] border border-white/40 shadow-2xl flex flex-col items-center gap-2 animate-pulse pointer-events-auto cursor-pointer transition-all hover:scale-105 hover:bg-white/90" onClick={(e) => { const rect = canvasRef.current?.getBoundingClientRect(); if (rect) { setViewOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top }); setSelectedId('ROOT'); } }}>
-              <div className="p-4 bg-blue-500 text-white rounded-full shadow-lg"><Target size={36} /></div>
-              <p className="text-xs font-bold text-blue-900">روی صفحه کلیک کنید تا نقطه شروع مشخص شود</p>
+            <div className="bg-white/70 backdrop-blur-sm p-10 rounded-[3rem] border border-white/40 shadow-2xl flex flex-col items-center gap-4 animate-pulse pointer-events-auto cursor-pointer transition-all hover:scale-105 hover:bg-white/90" onClick={(e) => { const rect = canvasRef.current?.getBoundingClientRect(); if (rect) { setViewOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top }); setSelectedId('ROOT'); } }}>
+              <div className="p-6 bg-blue-600 text-white rounded-full shadow-2xl ring-8 ring-blue-500/10"><Target size={48} /></div>
+              <div className="text-center">
+                <p className="text-sm font-bold text-blue-900">نقطه شروع نقشه را تعیین کنید</p>
+                <p className="text-[10px] text-slate-500 font-medium mt-1">روی هر قسمت از صفحه کلیک کنید</p>
+              </div>
             </div>
           </div>
         )}
 
         {isMeasureMode && (
-          <div className="absolute bottom-4 right-72 bg-amber-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg animate-bounce">
-            {measurePoints.length === 0 ? 'نقطه اول را انتخاب کنید' : measurePoints.length === 1 ? 'نقطه دوم را انتخاب کنید' : 'فاصله اندازه‌گیری شد'}
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-amber-500 text-white px-6 py-2 rounded-full text-[11px] font-bold shadow-2xl animate-bounce">
+            {measurePoints.length === 0 ? 'نقطه اول را روی نقشه انتخاب کنید' : measurePoints.length === 1 ? 'نقطه دوم را برای محاسبه فاصله انتخاب کنید' : 'فاصله اندازه‌گیری شد'}
           </div>
         )}
       </main>
@@ -393,27 +520,29 @@ const App: React.FC = () => {
       {/* Modals Logic */}
       {showPrintPreview && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-lg z-[200] flex items-center justify-center p-4">
-           <div className="bg-white rounded-[1.5rem] w-full max-w-5xl h-[90vh] shadow-2xl flex flex-col overflow-hidden">
-             <div className="p-4 border-b flex justify-between items-center bg-slate-50/50">
-               <div className="flex items-center gap-4">
-                 <h3 className="text-sm font-bold">پیش‌نمایش چاپ و فیت کاغذ</h3>
-                 <div className="flex gap-1 bg-slate-200 p-1 rounded-lg">
-                    <button onClick={() => setPaperSize('A4')} className={`px-4 py-1 rounded text-[10px] font-bold transition-all ${paperSize === 'A4' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>A4</button>
-                    <button onClick={() => setPaperSize('A3')} className={`px-4 py-1 rounded text-[10px] font-bold transition-all ${paperSize === 'A3' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>A3</button>
+           <div className="bg-white rounded-[2rem] w-full max-w-5xl h-[90vh] shadow-2xl flex flex-col overflow-hidden">
+             <div className="p-6 border-b flex justify-between items-center bg-slate-50/50">
+               <div className="flex items-center gap-6">
+                 <h3 className="text-sm font-bold">پیش‌نمایش چاپ نهایی</h3>
+                 <div className="flex gap-1.5 bg-slate-200 p-1.5 rounded-xl">
+                    <button onClick={() => setPaperSize('A4')} className={`px-6 py-1.5 rounded-lg text-[10px] font-bold transition-all ${paperSize === 'A4' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>A4</button>
+                    <button onClick={() => setPaperSize('A3')} className={`px-6 py-1.5 rounded-lg text-[10px] font-bold transition-all ${paperSize === 'A3' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>A3</button>
                  </div>
-                 <div className="flex gap-1 bg-slate-200 p-1 rounded-lg">
-                    <button onClick={() => setOrientation('LANDSCAPE')} className={`px-4 py-1 rounded text-[10px] font-bold transition-all ${orientation === 'LANDSCAPE' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>افقی</button>
-                    <button onClick={() => setOrientation('PORTRAIT')} className={`px-4 py-1 rounded text-[10px] font-bold transition-all ${orientation === 'PORTRAIT' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>عمودی</button>
+                 <div className="flex gap-1.5 bg-slate-200 p-1.5 rounded-xl">
+                    <button onClick={() => setOrientation('LANDSCAPE')} className={`px-6 py-1.5 rounded-lg text-[10px] font-bold transition-all ${orientation === 'LANDSCAPE' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>افقی</button>
+                    <button onClick={() => setOrientation('PORTRAIT')} className={`px-6 py-1.5 rounded-lg text-[10px] font-bold transition-all ${orientation === 'PORTRAIT' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>عمودی</button>
                  </div>
                </div>
-               <button onClick={() => setShowPrintPreview(false)} className="text-slate-400 hover:text-red-500 transition-colors p-1"><X size={20} /></button>
+               <button onClick={() => setShowPrintPreview(false)} className="text-slate-400 hover:text-red-500 transition-colors p-2 bg-slate-100 rounded-full"><X size={24} /></button>
              </div>
-             <div className="flex-1 bg-slate-200/50 p-6 flex items-center justify-center overflow-auto scrollbar-hide">
+             <div className="flex-1 bg-slate-200/50 p-8 flex items-center justify-center overflow-auto scrollbar-hide">
                <canvas ref={previewCanvasRef} className="bg-white shadow-2xl border border-slate-300 max-h-full max-w-full object-contain transition-opacity duration-300" />
              </div>
-             <div className="p-4 border-t bg-white flex justify-end gap-3">
-               <button onClick={() => setShowPrintPreview(false)} className="px-6 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors">بازگشت</button>
-               <button onClick={() => { const canvas = previewCanvasRef.current; if (canvas) { const link = document.createElement('a'); link.download = `IsoPlan_${paperSize}_${orientation}.png`; link.href = canvas.toDataURL('image/png', 1.0); link.click(); } }} className="px-10 py-2.5 bg-blue-600 text-white rounded-lg text-xs font-bold shadow-lg hover:bg-blue-700 transition-all active:scale-95">دانلود تصویر</button>
+             <div className="p-6 border-t bg-white flex justify-end gap-4">
+               <button onClick={() => setShowPrintPreview(false)} className="px-8 py-3 text-[11px] font-bold text-slate-500 hover:text-slate-800 transition-colors">بازگشت به ویرایش</button>
+               <button onClick={() => { const canvas = previewCanvasRef.current; if (canvas) { const link = document.createElement('a'); link.download = `IsoPlan_${paperSize}_${orientation}.png`; link.href = canvas.toDataURL('image/png', 1.0); link.click(); } }} className="px-12 py-3.5 bg-blue-600 text-white rounded-xl text-[11px] font-bold shadow-xl hover:bg-blue-700 transition-all active:scale-95 flex items-center gap-2">
+                 <Save size={18} /> دانلود تصویر با کیفیت عالی
+               </button>
              </div>
            </div>
         </div>
@@ -421,23 +550,29 @@ const App: React.FC = () => {
 
       {showAiModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur z-[500] flex items-center justify-center p-4">
-            <div className="bg-white rounded-[1.5rem] w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-                <div className="p-4 border-b flex justify-between items-center bg-slate-50">
-                    <h3 className="text-sm font-bold flex items-center gap-2">
-                      {modalMode === 'SAFETY' ? <ShieldCheck className="text-emerald-500" size={16} /> : <Calculator className="text-blue-500" size={16} />}
-                      تحلیل هوشمند مهندسی
+            <div className="bg-white rounded-[2rem] w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+                <div className="p-6 border-b flex justify-between items-center bg-slate-50">
+                    <h3 className="text-sm font-bold flex items-center gap-3">
+                      {modalMode === 'SAFETY' ? <ShieldCheck className="text-emerald-500" size={20} /> : <Calculator className="text-blue-500" size={20} />}
+                      تحلیل هوشمند پروژه (توسط Gemini 2.0)
                     </h3>
-                    <button onClick={() => setShowAiModal(false)} className="text-slate-400 hover:text-red-500 transition-colors p-1"><X size={20} /></button>
+                    <button onClick={() => setShowAiModal(false)} className="text-slate-400 hover:text-red-500 transition-colors p-2 bg-slate-100 rounded-full"><X size={24} /></button>
                 </div>
-                <div className="p-6 overflow-y-auto text-[12px] leading-relaxed text-slate-700 whitespace-pre-wrap rtl scrollbar-hide">
+                <div className="p-8 overflow-y-auto text-[13px] leading-relaxed text-slate-700 whitespace-pre-wrap rtl scrollbar-hide">
                     {aiLoading ? (
-                        <div className="flex flex-col items-center justify-center py-12 gap-4">
-                            <Loader2 className="animate-spin text-blue-600" size={32} />
-                            <p className="text-slate-500 animate-pulse font-bold">درحال پردازش اطلاعات فنی...</p>
+                        <div className="flex flex-col items-center justify-center py-20 gap-6">
+                            <Loader2 className="animate-spin text-blue-600" size={48} />
+                            <div className="text-center">
+                              <p className="text-slate-800 font-bold">درحال پردازش اطلاعات فنی نقشه...</p>
+                              <p className="text-slate-400 text-[11px] mt-2">این فرآیند ممکن است چند لحظه طول بکشد</p>
+                            </div>
                         </div>
                     ) : (
-                      <div className="prose prose-sm prose-slate max-w-none rtl">{aiResponse}</div>
+                      <div className="prose prose-sm prose-slate max-w-none rtl font-medium leading-loose">{aiResponse}</div>
                     )}
+                </div>
+                <div className="p-4 bg-slate-50 border-t flex justify-end">
+                  <button onClick={() => setShowAiModal(false)} className="px-8 py-2 bg-slate-800 text-white rounded-xl text-[11px] font-bold shadow-md hover:bg-black transition-all">بسیار عالی</button>
                 </div>
             </div>
         </div>
