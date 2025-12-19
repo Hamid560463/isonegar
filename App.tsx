@@ -5,7 +5,7 @@ import {
   FileText, Loader2, Wrench, ZoomIn, ZoomOut, Move, Target,
   Settings, ChevronRight, Share2, Info, CheckCircle2, Ruler,
   Upload, FileJson, Tag, Eye, EyeOff, Printer, Maximize2, X, List, Edit3, SaveAll,
-  ShieldCheck, Calculator, FileStack, Layout, Undo2
+  ShieldCheck, Calculator, FileStack, Layout, Undo2, Redo2
 } from 'lucide-react';
 import { Direction, FittingType, InstallationType, PipeSegment, ResolvedCoordinates, Vector2D } from './types';
 import { CONFIG } from './constants';
@@ -39,11 +39,15 @@ const App: React.FC = () => {
   const [zoom, setZoom] = useState<number>(1.2);
   const [isMeasureMode, setIsMeasureMode] = useState<boolean>(false);
   const [measurePoints, setMeasurePoints] = useState<Vector2D[]>([]);
+  const [mousePos, setMousePos] = useState<Vector2D>({ x: 0, y: 0 });
   const [selectedId, setSelectedId] = useState<string>('ROOT');
   const [isDragging, setIsDragging] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
   
+  // Professional History Management
   const [history, setHistory] = useState<HistoryState[]>([]);
+  const [redoStack, setRedoStack] = useState<HistoryState[]>([]);
+  
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState("");
   const [showAiModal, setShowAiModal] = useState(false);
@@ -74,12 +78,10 @@ const App: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Persistence
   useEffect(() => {
     localStorage.setItem('smartgas_project_data', JSON.stringify({ pipes }));
   }, [pipes]);
 
-  // Handle auto-centering
   useEffect(() => {
     if (viewOffset.x === 0 && viewOffset.y === 0 && containerRef.current) {
         setViewOffset({ 
@@ -89,7 +91,6 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Sync form when selection changes
   useEffect(() => {
     if (selectedId !== 'ROOT') {
       const pipe = pipes.find(p => p.id === selectedId);
@@ -106,7 +107,12 @@ const App: React.FC = () => {
     }
   }, [selectedId, pipes]);
 
-  // Logic: if equipment is chosen, default length to 0 to avoid drawing a pipe line
+  // Utility to capture state before mutation
+  const commitToHistory = useCallback(() => {
+    setHistory(prev => [...prev.slice(-49), { pipes: JSON.parse(JSON.stringify(pipes)), selectedId }]);
+    setRedoStack([]); // Clear redo stack on new action
+  }, [pipes, selectedId]);
+
   const handleFittingChange = (type: FittingType) => {
     setForm(prev => ({
       ...prev,
@@ -116,10 +122,6 @@ const App: React.FC = () => {
   };
 
   const pipeCoords = useMemo(() => resolveAllCoordinates(pipes), [pipes]);
-
-  const saveToHistory = useCallback(() => {
-    setHistory(prev => [...prev.slice(-19), { pipes: JSON.parse(JSON.stringify(pipes)), selectedId }]);
-  }, [pipes, selectedId]);
 
   const handleAiAnalysis = async (mode: 'SAFETY' | 'MTO') => {
     setAiLoading(true);
@@ -138,10 +140,20 @@ const App: React.FC = () => {
 
   const handleUndo = () => {
     if (history.length === 0) return;
-    const last = history[history.length - 1];
+    const previous = history[history.length - 1];
+    setRedoStack(prev => [...prev, { pipes: JSON.parse(JSON.stringify(pipes)), selectedId }]);
     setHistory(prev => prev.slice(0, -1));
-    setPipes(last.pipes);
-    setSelectedId(last.selectedId);
+    setPipes(previous.pipes);
+    setSelectedId(previous.selectedId);
+  };
+
+  const handleRedo = () => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    setHistory(prev => [...prev, { pipes: JSON.parse(JSON.stringify(pipes)), selectedId }]);
+    setRedoStack(prev => prev.slice(0, -1));
+    setPipes(next.pipes);
+    setSelectedId(next.selectedId);
   };
 
   const handleZoom = (factor: number) => setZoom(z => Math.max(0.1, Math.min(10, z * factor)));
@@ -170,6 +182,17 @@ const App: React.FC = () => {
     ctx.fillStyle = isExport ? '#ffffff' : '#f8fafc';
     ctx.fillRect(0, 0, width, height);
 
+    if (!isExport && isMeasureMode) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(245, 158, 11, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.moveTo(mousePos.x, 0); ctx.lineTo(mousePos.x, height);
+      ctx.moveTo(0, mousePos.y); ctx.lineTo(width, mousePos.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     ctx.save();
     ctx.translate(offset.x, offset.y);
     ctx.scale(scale, scale);
@@ -183,7 +206,6 @@ const App: React.FC = () => {
       ctx.stroke();
     }
 
-    // Root Point - Updated to just "شروع" as per screenshot request
     ctx.beginPath();
     ctx.arc(0, 0, 8 / scale, 0, Math.PI * 2);
     ctx.fillStyle = CONFIG.COLORS.ROOT;
@@ -201,7 +223,6 @@ const App: React.FC = () => {
       const sizePx = (CONFIG.SIZES[pipe.size as keyof typeof CONFIG.SIZES] || 2);
       const color = (CONFIG.SIZE_COLORS[pipe.size as keyof typeof CONFIG.SIZE_COLORS] || CONFIG.COLORS.PIPE);
 
-      // Only draw line if length > 0
       if (pipe.length > 0) {
         ctx.beginPath();
         ctx.moveTo(coords.startX, coords.startY);
@@ -227,13 +248,11 @@ const App: React.FC = () => {
         ctx.restore();
       }
 
-      // Draw fitting regardless of pipe length (allows 0-length fittings)
       if (pipe.fitting !== 'NONE') {
         drawFittingSymbol(ctx, pipe.fitting, coords.endX, coords.endY, pipe.direction, scale);
       }
     });
 
-    // Measurement Rendering
     if (!isExport && isMeasureMode && measurePoints.length > 0) {
       ctx.save();
       ctx.beginPath();
@@ -244,7 +263,6 @@ const App: React.FC = () => {
       if (measurePoints.length > 1) {
         ctx.lineTo(measurePoints[1].x, measurePoints[1].y);
         ctx.stroke();
-
         const dist = Math.round(Math.hypot(measurePoints[1].x - measurePoints[0].x, measurePoints[1].y - measurePoints[0].y) / CONFIG.SCALE);
         ctx.fillStyle = CONFIG.COLORS.MEASURE;
         ctx.font = `bold ${14/scale}px Vazirmatn`;
@@ -253,8 +271,6 @@ const App: React.FC = () => {
         ctx.fillText(`${dist} cm`, (measurePoints[0].x + measurePoints[1].x)/2, (measurePoints[0].y + measurePoints[1].y)/2 - 10/scale);
       }
       ctx.restore();
-
-      // Markers for points
       measurePoints.forEach(p => {
         ctx.beginPath(); ctx.arc(p.x, p.y, 5/scale, 0, Math.PI*2); ctx.fillStyle = CONFIG.COLORS.MEASURE; ctx.fill();
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5/scale; ctx.stroke();
@@ -276,7 +292,6 @@ const App: React.FC = () => {
     ctx.restore();
 
     if (!isExport) {
-      // Legend
       ctx.save();
       const lx = 20, ly = height - 160;
       ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
@@ -289,19 +304,17 @@ const App: React.FC = () => {
       });
       ctx.restore();
 
-      // Persian Compass (translated)
       ctx.save();
       const cx = width - 80, cy = height - 80;
       ctx.translate(cx, cy);
       const s = 30; const c30 = Math.cos(Math.PI/6), s30 = Math.sin(Math.PI/6);
-      // N=شمال (ش), S=جنوب (ج), E=شرق (ق), W=غرب (غ)
       [[c30,-s30,'ش','#ef4444'],[-c30,s30,'ج','#64748b'],[c30,s30,'ق','#3b82f6'],[-c30,-s30,'غ','#64748b']].forEach(([dx,dy,l,cl]) => {
         ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Number(dx)*s, Number(dy)*s); ctx.strokeStyle = cl as string; ctx.lineWidth=2; ctx.stroke();
         ctx.fillStyle = cl as string; ctx.font='bold 11px Vazirmatn'; ctx.textAlign='center'; ctx.fillText(l as string, Number(dx)*s*1.4, Number(dy)*s*1.4 + 4);
       });
       ctx.restore();
     }
-  }, [pipes, pipeCoords, selectedId, isMeasureMode, measurePoints]);
+  }, [pipes, pipeCoords, selectedId, isMeasureMode, measurePoints, mousePos]);
 
   const mainDraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -309,13 +322,25 @@ const App: React.FC = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
-    const w = containerRef.current.clientWidth, h = containerRef.current.clientHeight;
-    canvas.width = w * dpr; canvas.height = h * dpr;
+    const w = containerRef.current.clientWidth;
+    const h = containerRef.current.clientHeight;
+
+    if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+    }
+    
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
     renderScene(ctx, w, h, viewOffset, zoom, false);
   }, [renderScene, viewOffset, zoom]);
 
-  useEffect(() => { requestAnimationFrame(mainDraw); }, [mainDraw]);
+  useEffect(() => {
+    const frameId = requestAnimationFrame(mainDraw);
+    return () => cancelAnimationFrame(frameId);
+  }, [mainDraw]);
 
   useEffect(() => {
     if (showPrintPreview && previewCanvasRef.current) {
@@ -343,8 +368,6 @@ const App: React.FC = () => {
   const handleCanvasClick = (e: React.MouseEvent) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
-
-    // Convert mouse pixels to world coordinates
     const worldX = (e.clientX - rect.left - viewOffset.x) / zoom;
     const worldY = (e.clientY - rect.top - viewOffset.y) / zoom;
 
@@ -357,11 +380,10 @@ const App: React.FC = () => {
     if (isDragging) return;
 
     if (isMeasureMode) {
-      if (measurePoints.length >= 2) {
-        setMeasurePoints([{ x: worldX, y: worldY }]);
-      } else {
-        setMeasurePoints([...measurePoints, { x: worldX, y: worldY }]);
-      }
+      setMeasurePoints(prev => {
+        if (prev.length >= 2) return [{ x: worldX, y: worldY }];
+        return [...prev, { x: worldX, y: worldY }];
+      });
       return;
     }
 
@@ -374,15 +396,39 @@ const App: React.FC = () => {
     setSelectedId(bestId);
   };
 
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setMousePos({ x, y });
+    if (isDragging) {
+        setViewOffset(v => ({ x: v.x + (e.clientX - lastMousePos.x), y: v.y + (e.clientY - lastMousePos.y) }));
+        setLastMousePos({ x: e.clientX, y: e.clientY });
+    }
+  };
+
   const handleAddPipe = () => {
-    saveToHistory();
+    commitToHistory();
     const id = Math.random().toString(36).substr(2, 9);
     setPipes(prev => [...prev, { id, parentId: selectedId, ...form }]);
     setSelectedId(id);
-    // After adding equipment with 0 length, reset fitting to NONE for next standard pipe
     if (form.fitting !== 'NONE') {
         setForm(f => ({ ...f, fitting: 'NONE', length: 100 }));
     }
+  };
+
+  const handleDeletePipe = () => {
+    if (selectedId === 'ROOT') return;
+    commitToHistory();
+    setPipes(prev => prev.filter(p => p.id !== selectedId));
+    setSelectedId('ROOT');
+  };
+
+  const handleUpdatePipe = () => {
+    if (selectedId === 'ROOT') return;
+    commitToHistory();
+    setPipes(prev => prev.map(p => p.id === selectedId ? {...p, ...form} : p));
   };
 
   return (
@@ -393,28 +439,38 @@ const App: React.FC = () => {
           reader.onload = (ev) => {
             try {
               const data = JSON.parse(ev.target?.result as string);
-              if (data.pipes) setPipes(data.pipes);
-              else if (Array.isArray(data)) setPipes(data);
+              if (data.pipes) { commitToHistory(); setPipes(data.pipes); }
+              else if (Array.isArray(data)) { commitToHistory(); setPipes(data); }
               setSelectedId('ROOT');
             } catch(e) { alert("خطا در خواندن فایل"); }
           };
           reader.readAsText(file);
       }} className="hidden" />
 
-      {/* Sidebar with Updated Name */}
       <aside className="w-64 bg-white border-l border-slate-200 shadow-2xl z-30 flex flex-col h-full shrink-0">
         <header className="p-3 border-b bg-slate-50/50 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-1 bg-blue-600 rounded text-white shadow-sm"><Layers size={14} /></div>
             <h1 className="text-xs font-bold tracking-tight truncate">ایزو نگار (IsoNegar)</h1>
           </div>
-          <button 
-            onClick={handleUndo} 
-            disabled={history.length === 0} 
-            className={`p-1 rounded transition-all border ${history.length > 0 ? 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200' : 'text-slate-200 border-slate-100 cursor-not-allowed'}`}
-          >
-            <Undo2 size={14} />
-          </button>
+          <div className="flex gap-1">
+            <button 
+              onClick={handleUndo} 
+              disabled={history.length === 0} 
+              className={`p-1 rounded transition-all border ${history.length > 0 ? 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200 shadow-sm' : 'text-slate-200 border-slate-100 cursor-not-allowed'}`}
+              title="Undo"
+            >
+              <Undo2 size={14} />
+            </button>
+            <button 
+              onClick={handleRedo} 
+              disabled={redoStack.length === 0} 
+              className={`p-1 rounded transition-all border ${redoStack.length > 0 ? 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200 shadow-sm' : 'text-slate-200 border-slate-100 cursor-not-allowed'}`}
+              title="Redo"
+            >
+              <Redo2 size={14} />
+            </button>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-3 space-y-4 scrollbar-hide">
@@ -483,18 +539,17 @@ const App: React.FC = () => {
                   <option value="FLANGE">فلنج</option>
                 </optgroup>
               </select>
-              <p className="text-[8px] text-slate-400 mt-0.5">برای افزودن تجهیز در محل، طول را صفر بگذارید.</p>
             </div>
 
             <div className="flex flex-col gap-2 pt-1">
               {selectedId !== 'ROOT' && (
-                <button onClick={() => { saveToHistory(); setPipes(prev => prev.map(p => p.id === selectedId ? {...p, ...form} : p)) }} className="w-full py-2 bg-slate-800 text-white rounded text-[10px] font-bold shadow-sm active:scale-95 transition-all">بروزرسانی تغییرات</button>
+                <button onClick={handleUpdatePipe} className="w-full py-2 bg-slate-800 text-white rounded text-[10px] font-bold shadow-sm active:scale-95 transition-all">بروزرسانی تغییرات</button>
               )}
               <button onClick={handleAddPipe} className="w-full py-3 bg-blue-600 text-white rounded text-[10px] font-bold shadow-md hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-1">
                 <Plus size={14} /> {form.fitting !== 'NONE' ? 'ثبت تجهیز' : 'ثبت انشعاب'}
               </button>
               {selectedId !== 'ROOT' && (
-                <button onClick={() => { saveToHistory(); setPipes(prev => prev.filter(p => p.id !== selectedId)); setSelectedId('ROOT'); }} className="w-full py-1 text-red-500 font-bold text-[9px] hover:bg-red-50 rounded transition-all">حذف این بخش</button>
+                <button onClick={handleDeletePipe} className="w-full py-1 text-red-500 font-bold text-[9px] hover:bg-red-50 rounded transition-all">حذف این بخش</button>
               )}
             </div>
 
@@ -518,21 +573,17 @@ const App: React.FC = () => {
         </footer>
       </aside>
 
-      <main ref={containerRef} className="flex-1 relative bg-slate-100 overflow-hidden"
+      <main 
+        ref={containerRef} 
+        className="flex-1 relative bg-slate-100 overflow-hidden"
         onMouseDown={e => { if (e.button === 1 || e.shiftKey) { setIsDragging(true); setLastMousePos({ x: e.clientX, y: e.clientY }); } }}
-        onMouseMove={e => {
-            if (isDragging) {
-                setViewOffset(v => ({ x: v.x + (e.clientX - lastMousePos.x), y: v.y + (e.clientY - lastMousePos.y) }));
-                setLastMousePos({ x: e.clientX, y: e.clientY });
-            }
-        }}
+        onMouseMove={handleMouseMove}
         onMouseUp={() => setIsDragging(false)}
       >
-        {/* Improved Cursor for Measurement */}
         <canvas 
           ref={canvasRef} 
           onClick={handleCanvasClick} 
-          className={`block w-full h-full ${isMeasureMode ? 'cursor-crosshair' : 'cursor-default'}`} 
+          className={`block w-full h-full ${isMeasureMode ? 'cursor-none' : 'cursor-default'}`} 
         />
 
         <div className="absolute top-4 left-4 flex flex-col gap-2">
@@ -582,7 +633,6 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Modals remain the same */}
       {showPrintPreview && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-lg z-[200] flex items-center justify-center p-4">
            <div className="bg-white rounded-[1.5rem] w-full max-w-5xl h-[90vh] shadow-2xl flex flex-col overflow-hidden">
