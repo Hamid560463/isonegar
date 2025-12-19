@@ -1,6 +1,7 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { PipeSegment } from "../types";
+// Fixed: Using domain types instead of empty root types
+import { PipeSegment } from "../domain/types";
 
 export class GeminiService {
   /**

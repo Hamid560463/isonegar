@@ -1,6 +1,7 @@
 
-import { Direction, ResolvedCoordinates, Vector2D, PipeSegment } from '../types';
-import { CONFIG } from '../constants';
+// Fixed: Using domain types and constants instead of empty root files
+import { Direction, ResolvedCoordinates, Vector2D, PipeSegment } from '../domain/types';
+import { CONFIG } from '../domain/constants';
 
 export const calculateIsoVector = (lengthCm: number, direction: Direction): Vector2D => {
   const len = lengthCm * CONFIG.SCALE;
