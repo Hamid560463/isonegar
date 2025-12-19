@@ -82,7 +82,7 @@ export const renderScene = ({
         ctx.lineWidth = (sizePx + 3) / scale;
       } else if (isHovered) {
         ctx.strokeStyle = '#60a5fa'; // Light blue for hover
-        ctx.lineWidth = (sizePx + 4) / scale;
+        ctx.lineWidth = (sizePx + 5) / scale; // Thicker on hover
       } else {
         ctx.strokeStyle = color;
         ctx.lineWidth = sizePx / scale;
@@ -99,6 +99,7 @@ export const renderScene = ({
       if (pipe.direction === 'UP' || pipe.direction === 'DOWN') { ox = 35 / scale; oy = 0; }
       
       ctx.save();
+      // Text color change on hover/selection
       ctx.fillStyle = isSelected ? CONFIG.COLORS.SELECTED : isHovered ? '#2563eb' : CONFIG.COLORS.LABEL;
       ctx.font = `bold ${11 / scale}px Vazirmatn`;
       ctx.textAlign = 'center';
