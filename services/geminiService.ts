@@ -3,14 +3,14 @@ import { GoogleGenAI } from "@google/genai";
 import { PipeSegment } from "../types";
 
 export class GeminiService {
-  private ai: GoogleGenAI;
-
-  constructor() {
-    // Initializing the GenAI client with API key from environment
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-  }
-
+  /**
+   * Analyzes project data for safety or MTO reports using Gemini 3 Pro.
+   * Initializes GenAI instance within the method to ensure fresh API key context.
+   */
   async analyzeProject(pipes: PipeSegment[], mode: 'SAFETY' | 'MTO'): Promise<string> {
+    // Initializing the GenAI client with API key from environment right before use
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+    
     // Upgraded to gemini-3-pro-preview for complex reasoning tasks
     const model = 'gemini-3-pro-preview';
     const systemInstruction = mode === 'SAFETY' 
@@ -21,7 +21,7 @@ export class GeminiService {
 
     try {
       // Direct call to generateContent as per latest SDK guidelines
-      const response = await this.ai.models.generateContent({
+      const response = await ai.models.generateContent({
         model,
         contents: prompt,
         config: {

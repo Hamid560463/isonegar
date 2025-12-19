@@ -38,6 +38,7 @@ const App: React.FC = () => {
   const [viewOffset, setViewOffset] = useState<Vector2D>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState<number>(1.2);
   const [isMeasureMode, setIsMeasureMode] = useState<boolean>(false);
+  const [measurePoints, setMeasurePoints] = useState<Vector2D[]>([]);
   const [selectedId, setSelectedId] = useState<string>('ROOT');
   const [isDragging, setIsDragging] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
@@ -78,7 +79,7 @@ const App: React.FC = () => {
     localStorage.setItem('smartgas_project_data', JSON.stringify({ pipes }));
   }, [pipes]);
 
-  // Handle auto-centering only if we have view offset at 0,0
+  // Handle auto-centering
   useEffect(() => {
     if (viewOffset.x === 0 && viewOffset.y === 0 && containerRef.current) {
         setViewOffset({ 
@@ -88,6 +89,7 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Sync form when selection changes
   useEffect(() => {
     if (selectedId !== 'ROOT') {
       const pipe = pipes.find(p => p.id === selectedId);
@@ -103,6 +105,15 @@ const App: React.FC = () => {
       }
     }
   }, [selectedId]);
+
+  // Handle fitting selection logic: if equipment is chosen, default length to 0
+  const handleFittingChange = (type: FittingType) => {
+    setForm(prev => ({
+      ...prev,
+      fitting: type,
+      length: type !== 'NONE' ? 0 : (prev.length === 0 ? 100 : prev.length)
+    }));
+  };
 
   const pipeCoords = useMemo(() => resolveAllCoordinates(pipes), [pipes]);
 
@@ -172,7 +183,7 @@ const App: React.FC = () => {
       ctx.stroke();
     }
 
-    // Root Point
+    // Root Point - Persian "شروع" only
     ctx.beginPath();
     ctx.arc(0, 0, 8 / scale, 0, Math.PI * 2);
     ctx.fillStyle = CONFIG.COLORS.ROOT;
@@ -181,7 +192,7 @@ const App: React.FC = () => {
     ctx.fillStyle = CONFIG.COLORS.ROOT;
     ctx.font = `bold ${14 / scale}px Vazirmatn`;
     ctx.textAlign = 'center';
-    ctx.fillText("شروع (کنتور)", 0, 24 / scale);
+    ctx.fillText("شروع", 0, 24 / scale);
 
     pipes.forEach(pipe => {
       const coords = pipeCoords.get(pipe.id);
@@ -190,6 +201,7 @@ const App: React.FC = () => {
       const sizePx = (CONFIG.SIZES[pipe.size as keyof typeof CONFIG.SIZES] || 2);
       const color = (CONFIG.SIZE_COLORS[pipe.size as keyof typeof CONFIG.SIZE_COLORS] || CONFIG.COLORS.PIPE);
 
+      // Only draw line if length > 0
       if (pipe.length > 0) {
         ctx.beginPath();
         ctx.moveTo(coords.startX, coords.startY);
@@ -215,10 +227,38 @@ const App: React.FC = () => {
         ctx.restore();
       }
 
+      // Draw fitting regardless of pipe length
       if (pipe.fitting !== 'NONE') {
         drawFittingSymbol(ctx, pipe.fitting, coords.endX, coords.endY, pipe.direction, scale);
       }
     });
+
+    // Measurement Rendering
+    if (!isExport && isMeasureMode && measurePoints.length > 0) {
+      ctx.beginPath();
+      ctx.strokeStyle = CONFIG.COLORS.MEASURE;
+      ctx.setLineDash([4/scale, 4/scale]);
+      ctx.lineWidth = 2/scale;
+      ctx.moveTo(measurePoints[0].x, measurePoints[0].y);
+      if (measurePoints.length > 1) {
+        ctx.lineTo(measurePoints[1].x, measurePoints[1].y);
+        ctx.stroke();
+
+        const pixelDist = Math.hypot(measurePoints[1].x - measurePoints[0].x, measurePoints[1].y - measurePoints[0].y);
+        const cmDist = Math.round(pixelDist / CONFIG.SCALE);
+        
+        ctx.fillStyle = CONFIG.COLORS.MEASURE;
+        ctx.font = `bold ${14/scale}px Vazirmatn`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`${cmDist} cm`, (measurePoints[0].x + measurePoints[1].x)/2, (measurePoints[0].y + measurePoints[1].y)/2 - 10/scale);
+      }
+      ctx.setLineDash([]);
+      
+      // Draw point markers
+      measurePoints.forEach(p => {
+        ctx.beginPath(); ctx.arc(p.x, p.y, 4/scale, 0, Math.PI*2); ctx.fillStyle = CONFIG.COLORS.MEASURE; ctx.fill();
+      });
+    }
 
     if (!isExport) {
         pipes.forEach(p => {
@@ -248,18 +288,20 @@ const App: React.FC = () => {
       });
       ctx.restore();
 
-      // Compass
+      // Persian Compass (North: ش, South: ج, East: ق, West: غ)
       ctx.save();
       const cx = width - 80, cy = height - 80;
       ctx.translate(cx, cy);
-      const s = 30; const c30 = Math.cos(Math.PI/6), s30 = Math.sin(Math.PI/6);
-      [[c30,-s30,'N','#ef4444'],[-c30,s30,'S','#64748b'],[c30,s30,'E','#3b82f6'],[-c30,-s30,'W','#64748b']].forEach(([dx,dy,l,cl]) => {
+      const s = 30; 
+      const c30 = Math.cos(CONFIG.ISO_ANGLE);
+      const s30 = Math.sin(CONFIG.ISO_ANGLE);
+      [[c30,-s30,'ش','#ef4444'],[-c30,s30,'ج','#64748b'],[c30,s30,'ق','#3b82f6'],[-c30,-s30,'غ','#64748b']].forEach(([dx,dy,l,cl]) => {
         ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Number(dx)*s, Number(dy)*s); ctx.strokeStyle = cl as string; ctx.lineWidth=2; ctx.stroke();
-        ctx.fillStyle = cl as string; ctx.font='bold 9px Vazirmatn'; ctx.fillText(l as string, Number(dx)*s*1.4, Number(dy)*s*1.4);
+        ctx.fillStyle = cl as string; ctx.font='bold 12px Vazirmatn'; ctx.textAlign = 'center'; ctx.fillText(l as string, Number(dx)*s*1.5, Number(dy)*s*1.5 + 4);
       });
       ctx.restore();
     }
-  }, [pipes, pipeCoords, selectedId]);
+  }, [pipes, pipeCoords, selectedId, isMeasureMode, measurePoints]);
 
   const mainDraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -302,21 +344,30 @@ const App: React.FC = () => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
 
+    // Convert mouse pixels to canvas world coordinates
+    const clickX = (e.clientX - rect.left - viewOffset.x) / zoom;
+    const clickY = (e.clientY - rect.top - viewOffset.y) / zoom;
+
     if (pipes.length === 0) {
-      // Set the root location based on the click
       setViewOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top });
       setSelectedId('ROOT');
       return;
     }
 
-    if (isDragging || isMeasureMode) return;
-    const x = (e.clientX - rect.left - viewOffset.x) / zoom;
-    const y = (e.clientY - rect.top - viewOffset.y) / zoom;
+    if (isDragging) return;
 
-    if (Math.hypot(x, y) < 20/zoom) { setSelectedId('ROOT'); return; }
+    if (isMeasureMode) {
+      setMeasurePoints(prev => {
+        if (prev.length >= 2) return [{ x: clickX, y: clickY }];
+        return [...prev, { x: clickX, y: clickY }];
+      });
+      return;
+    }
+
+    if (Math.hypot(clickX, clickY) < 20/zoom) { setSelectedId('ROOT'); return; }
     let bestId = 'ROOT', minD = 20/zoom;
     for (const [id, c] of pipeCoords.entries()) {
-        const d = getDistanceToSegment(x, y, c.startX, c.startY, c.endX, c.endY);
+        const d = getDistanceToSegment(clickX, clickY, c.startX, c.startY, c.endX, c.endY);
         if (d < minD) { minD = d; bestId = id; }
     }
     setSelectedId(bestId);
@@ -327,6 +378,10 @@ const App: React.FC = () => {
     const id = Math.random().toString(36).substr(2, 9);
     setPipes(prev => [...prev, { id, parentId: selectedId, ...form }]);
     setSelectedId(id);
+    // If it was a fitting only, keep fitting at NONE for the next segment
+    if (form.fitting !== 'NONE') {
+        setForm(f => ({ ...f, fitting: 'NONE', length: 100 }));
+    }
   };
 
   return (
@@ -345,7 +400,6 @@ const App: React.FC = () => {
           reader.readAsText(file);
       }} className="hidden" />
 
-      {/* Reduced Sidebar Width */}
       <aside className="w-64 bg-white border-l border-slate-200 shadow-2xl z-30 flex flex-col h-full shrink-0">
         <header className="p-3 border-b bg-slate-50/50 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -365,7 +419,7 @@ const App: React.FC = () => {
         <div className="flex-1 overflow-y-auto p-3 space-y-4 scrollbar-hide">
           <div className="p-2 bg-blue-50/50 border border-blue-100 rounded-lg">
             <label className="text-[8px] font-bold text-slate-400 flex items-center gap-1 uppercase tracking-widest"><Target size={10} /> انتخاب شده</label>
-            <div className="text-[10px] font-bold text-blue-900 truncate mt-0.5">{selectedId === 'ROOT' ? 'نقطه شروع (کنتور)' : `انشعاب ${selectedId.slice(0, 4)}`}</div>
+            <div className="text-[10px] font-bold text-blue-900 truncate mt-0.5">{selectedId === 'ROOT' ? 'نقطه شروع' : `انشعاب ${selectedId.slice(0, 4)}`}</div>
           </div>
 
           <div className="space-y-3">
@@ -398,7 +452,11 @@ const App: React.FC = () => {
 
             <div className="space-y-1">
               <label className="text-[10px] font-bold text-slate-500">تجهیز و المان</label>
-              <select className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-[10px] outline-none" value={form.fitting} onChange={e => setForm({...form, fitting: e.target.value as FittingType})}>
+              <select 
+                className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-[10px] outline-none" 
+                value={form.fitting} 
+                onChange={e => handleFittingChange(e.target.value as FittingType)}
+              >
                 <option value="NONE">بدون تجهیز (زانو)</option>
                 <optgroup label="شیرآلات">
                   <option value="VALVE_MAIN">شیر اصلی</option>
@@ -431,7 +489,9 @@ const App: React.FC = () => {
               {selectedId !== 'ROOT' && (
                 <button onClick={() => { saveToHistory(); setPipes(prev => prev.map(p => p.id === selectedId ? {...p, ...form} : p)) }} className="w-full py-2 bg-slate-800 text-white rounded text-[10px] font-bold shadow-sm active:scale-95 transition-all">بروزرسانی تغییرات</button>
               )}
-              <button onClick={handleAddPipe} className="w-full py-3 bg-blue-600 text-white rounded text-[10px] font-bold shadow-md hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-1"><Plus size={14} /> ثبت انشعاب جدید</button>
+              <button onClick={handleAddPipe} className="w-full py-3 bg-blue-600 text-white rounded text-[10px] font-bold shadow-md hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-1">
+                <Plus size={14} /> {form.fitting !== 'NONE' ? 'ثبت تجهیز جدید' : 'ثبت انشعاب جدید'}
+              </button>
               {selectedId !== 'ROOT' && (
                 <button onClick={() => { saveToHistory(); setPipes(prev => prev.filter(p => p.id !== selectedId)); setSelectedId('ROOT'); }} className="w-full py-1 text-red-500 font-bold text-[9px] hover:bg-red-50 rounded transition-all">حذف این بخش</button>
               )}
@@ -477,7 +537,16 @@ const App: React.FC = () => {
             }} className="p-1.5 hover:bg-blue-50 text-slate-600 rounded" title="Reset View"><Move size={18} /></button>
             <button onClick={() => handleZoom(0.8)} className="p-1.5 hover:bg-blue-50 text-slate-600 rounded"><ZoomOut size={18} /></button>
             <div className="h-px bg-slate-200 my-0.5 mx-1" />
-            <button onClick={() => setIsMeasureMode(!isMeasureMode)} className={`p-1.5 rounded transition-all ${isMeasureMode ? 'bg-amber-500 text-white shadow-lg' : 'hover:bg-amber-50 text-slate-600'}`}><Ruler size={18} /></button>
+            <button 
+              onClick={() => {
+                setIsMeasureMode(!isMeasureMode);
+                setMeasurePoints([]);
+              }} 
+              className={`p-1.5 rounded transition-all ${isMeasureMode ? 'bg-amber-500 text-white shadow-lg' : 'hover:bg-amber-50 text-slate-600'}`}
+              title="اندازه‌گیری"
+            >
+              <Ruler size={18} />
+            </button>
           </div>
         </div>
 
@@ -501,7 +570,7 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Print Preview Pro */}
+      {/* Modals remain same */}
       {showPrintPreview && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-lg z-[200] flex items-center justify-center p-4">
            <div className="bg-white rounded-[1.5rem] w-full max-w-5xl h-[90vh] shadow-2xl flex flex-col overflow-hidden">
