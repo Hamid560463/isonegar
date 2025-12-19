@@ -73,16 +73,29 @@ export const renderScene = ({
     const color = (CONFIG.SIZE_COLORS[pipe.size as keyof typeof CONFIG.SIZE_COLORS] || CONFIG.COLORS.PIPE);
 
     if (pipe.length > 0) {
+      // Draw highlight/glow under the segment if hovered or selected
+      if (isSelected || isHovered) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(coords.startX, coords.startY);
+        ctx.lineTo(coords.endX, coords.endY);
+        ctx.strokeStyle = isSelected ? 'rgba(59, 130, 246, 0.2)' : 'rgba(96, 165, 250, 0.2)';
+        ctx.lineWidth = (sizePx + 15) / scale;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+        ctx.restore();
+      }
+
       ctx.beginPath();
       ctx.moveTo(coords.startX, coords.startY);
       ctx.lineTo(coords.endX, coords.endY);
       
       if (isSelected) {
         ctx.strokeStyle = CONFIG.COLORS.SELECTED;
-        ctx.lineWidth = (sizePx + 3) / scale;
+        ctx.lineWidth = (sizePx + 4) / scale;
       } else if (isHovered) {
-        ctx.strokeStyle = '#60a5fa'; // Light blue for hover
-        ctx.lineWidth = (sizePx + 5) / scale; 
+        ctx.strokeStyle = '#60a5fa'; 
+        ctx.lineWidth = (sizePx + 6) / scale; 
       } else {
         ctx.strokeStyle = color;
         ctx.lineWidth = sizePx / scale;
@@ -131,8 +144,8 @@ export const renderScene = ({
     }
     ctx.restore();
     measurePoints.forEach(p => {
-      ctx.beginPath(); ctx.arc(p.x, p.y, 6/scale, 0, Math.PI*2); ctx.fillStyle = CONFIG.COLORS.MEASURE; ctx.fill();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5/scale; ctx.stroke();
+      ctx.beginPath(); ctx.arc(p.x, p.y, 7/scale, 0, Math.PI*2); ctx.fillStyle = CONFIG.COLORS.MEASURE; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2/scale; ctx.stroke();
     });
   }
 
@@ -141,12 +154,11 @@ export const renderScene = ({
           const c = pipeCoords.get(p.id);
           if (c) {
               const isActive = selectedId === p.id || hoveredId === p.id;
-              // Slightly larger hit points visually for mobile/touch
-              const radius = (isActive ? 7 : 5) / scale;
+              const radius = (isActive ? 8 : 6) / scale;
               ctx.beginPath(); ctx.arc(c.endX, c.endY, radius, 0, Math.PI*2);
               ctx.fillStyle = selectedId === p.id ? CONFIG.COLORS.SELECTED : hoveredId === p.id ? '#60a5fa' : '#fff';
               ctx.strokeStyle = CONFIG.COLORS.SELECTED;
-              ctx.lineWidth = 2/scale;
+              ctx.lineWidth = 2.5/scale;
               ctx.fill(); ctx.stroke();
           }
       });
@@ -154,7 +166,6 @@ export const renderScene = ({
   ctx.restore();
 
   if (!isExport) {
-    // Legend - Hidden on very small screens to save space
     if (width > 500) {
       ctx.save();
       const lx = 20, ly = height - 160;
@@ -173,7 +184,7 @@ export const renderScene = ({
     ctx.save();
     const cx = width - 60, cy = height - 60;
     ctx.translate(cx, cy);
-    const s = width < 400 ? 20 : 30; // Scale compass for small screens
+    const s = width < 400 ? 20 : 30;
     const c30 = Math.cos(Math.PI/6), s30 = Math.sin(Math.PI/6);
     [[c30,-s30,'ش','#ef4444'],[-c30,s30,'ج','#64748b'],[c30,s30,'ق','#3b82f6'],[-c30,-s30,'غ','#64748b']].forEach(([dx,dy,l,cl]) => {
       ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Number(dx)*s, Number(dy)*s); ctx.strokeStyle = cl as string; ctx.lineWidth=2; ctx.stroke();
