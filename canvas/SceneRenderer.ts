@@ -82,7 +82,7 @@ export const renderScene = ({
         ctx.lineWidth = (sizePx + 3) / scale;
       } else if (isHovered) {
         ctx.strokeStyle = '#60a5fa'; // Light blue for hover
-        ctx.lineWidth = (sizePx + 5) / scale; // Thicker on hover
+        ctx.lineWidth = (sizePx + 5) / scale; 
       } else {
         ctx.strokeStyle = color;
         ctx.lineWidth = sizePx / scale;
@@ -99,7 +99,6 @@ export const renderScene = ({
       if (pipe.direction === 'UP' || pipe.direction === 'DOWN') { ox = 35 / scale; oy = 0; }
       
       ctx.save();
-      // Text color change on hover/selection
       ctx.fillStyle = isSelected ? CONFIG.COLORS.SELECTED : isHovered ? '#2563eb' : CONFIG.COLORS.LABEL;
       ctx.font = `bold ${11 / scale}px Vazirmatn`;
       ctx.textAlign = 'center';
@@ -132,7 +131,7 @@ export const renderScene = ({
     }
     ctx.restore();
     measurePoints.forEach(p => {
-      ctx.beginPath(); ctx.arc(p.x, p.y, 5/scale, 0, Math.PI*2); ctx.fillStyle = CONFIG.COLORS.MEASURE; ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x, p.y, 6/scale, 0, Math.PI*2); ctx.fillStyle = CONFIG.COLORS.MEASURE; ctx.fill();
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5/scale; ctx.stroke();
     });
   }
@@ -142,10 +141,12 @@ export const renderScene = ({
           const c = pipeCoords.get(p.id);
           if (c) {
               const isActive = selectedId === p.id || hoveredId === p.id;
-              ctx.beginPath(); ctx.arc(c.endX, c.endY, (isActive ? 5 : 4)/scale, 0, Math.PI*2);
+              // Slightly larger hit points visually for mobile/touch
+              const radius = (isActive ? 7 : 5) / scale;
+              ctx.beginPath(); ctx.arc(c.endX, c.endY, radius, 0, Math.PI*2);
               ctx.fillStyle = selectedId === p.id ? CONFIG.COLORS.SELECTED : hoveredId === p.id ? '#60a5fa' : '#fff';
               ctx.strokeStyle = CONFIG.COLORS.SELECTED;
-              ctx.lineWidth = 1.5/scale;
+              ctx.lineWidth = 2/scale;
               ctx.fill(); ctx.stroke();
           }
       });
@@ -153,27 +154,30 @@ export const renderScene = ({
   ctx.restore();
 
   if (!isExport) {
-    // Legend
-    ctx.save();
-    const lx = 20, ly = height - 160;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.fillRect(lx, ly, 100, 140);
-    ctx.strokeStyle = '#cbd5e1'; ctx.strokeRect(lx, ly, 100, 140);
-    ctx.fillStyle = '#1e293b'; ctx.font = 'bold 11px Vazirmatn'; ctx.textAlign='center'; ctx.fillText('سایز لوله‌ها', lx + 50, ly + 20);
-    Object.entries(CONFIG.SIZE_COLORS).forEach(([size, col], i) => {
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(lx + 15, ly + 40 + i*18, 4, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = '#475569'; ctx.textAlign='right'; ctx.font='10px Vazirmatn'; ctx.fillText(size, lx + 90, ly + 43 + i*18);
-    });
-    ctx.restore();
+    // Legend - Hidden on very small screens to save space
+    if (width > 500) {
+      ctx.save();
+      const lx = 20, ly = height - 160;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fillRect(lx, ly, 100, 140);
+      ctx.strokeStyle = '#cbd5e1'; ctx.strokeRect(lx, ly, 100, 140);
+      ctx.fillStyle = '#1e293b'; ctx.font = 'bold 11px Vazirmatn'; ctx.textAlign='center'; ctx.fillText('سایز لوله‌ها', lx + 50, ly + 20);
+      Object.entries(CONFIG.SIZE_COLORS).forEach(([size, col], i) => {
+        ctx.fillStyle = col; ctx.beginPath(); ctx.arc(lx + 15, ly + 40 + i*18, 4, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#475569'; ctx.textAlign='right'; ctx.font='10px Vazirmatn'; ctx.fillText(size, lx + 90, ly + 43 + i*18);
+      });
+      ctx.restore();
+    }
 
     // Compass
     ctx.save();
-    const cx = width - 80, cy = height - 80;
+    const cx = width - 60, cy = height - 60;
     ctx.translate(cx, cy);
-    const s = 30; const c30 = Math.cos(Math.PI/6), s30 = Math.sin(Math.PI/6);
+    const s = width < 400 ? 20 : 30; // Scale compass for small screens
+    const c30 = Math.cos(Math.PI/6), s30 = Math.sin(Math.PI/6);
     [[c30,-s30,'ش','#ef4444'],[-c30,s30,'ج','#64748b'],[c30,s30,'ق','#3b82f6'],[-c30,-s30,'غ','#64748b']].forEach(([dx,dy,l,cl]) => {
       ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Number(dx)*s, Number(dy)*s); ctx.strokeStyle = cl as string; ctx.lineWidth=2; ctx.stroke();
-      ctx.fillStyle = cl as string; ctx.font='bold 11px Vazirmatn'; ctx.textAlign='center'; ctx.fillText(l as string, Number(dx)*s*1.4, Number(dy)*s*1.4 + 4);
+      ctx.fillStyle = cl as string; ctx.font='bold 10px Vazirmatn'; ctx.textAlign='center'; ctx.fillText(l as string, Number(dx)*s*1.4, Number(dy)*s*1.4 + 4);
     });
     ctx.restore();
   }
