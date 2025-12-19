@@ -39,12 +39,10 @@ const App: React.FC = () => {
   const [showPrintPreview, setShowPrintPreview] = useState(false);
   const [paperSize, setPaperSize] = useState<PaperSize>('A4');
   const [orientation, setOrientation] = useState<Orientation>('LANDSCAPE');
+  const [showStartHint, setShowStartHint] = useState(true);
 
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
-
-  // New state to manage the initial hint visibility
-  const [showStartHint, setShowStartHint] = useState(true);
 
   const [form, setForm] = useState<{ 
     length: number; 
@@ -77,21 +75,15 @@ const App: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Timer to dismiss hint
   useEffect(() => {
     if (pipes.length === 0 && showStartHint) {
-      const timer = setTimeout(() => {
-        setShowStartHint(false);
-      }, 5000); // 5 seconds display
+      const timer = setTimeout(() => setShowStartHint(false), 5000);
       return () => clearTimeout(timer);
     }
   }, [pipes.length, showStartHint]);
 
-  // If pipes exist, hint should definitely be gone
   useEffect(() => {
-    if (pipes.length > 0) {
-      setShowStartHint(false);
-    }
+    if (pipes.length > 0) setShowStartHint(false);
   }, [pipes.length]);
 
   useEffect(() => {
@@ -120,6 +112,22 @@ const App: React.FC = () => {
   }, [selectedId, pipes]);
 
   const pipeCoords = useMemo(() => resolveAllCoordinates(pipes), [pipes]);
+
+  const calculateBoundingBox = useCallback(() => {
+    let minX = -50, minY = -50, maxX = 50, maxY = 50;
+    if (pipes.length > 0) {
+      minX = 0; minY = 0; maxX = 0; maxY = 0;
+      pipeCoords.forEach(c => {
+        minX = Math.min(minX, c.startX, c.endX);
+        maxX = Math.max(maxX, c.startX, c.endX);
+        minY = Math.min(minY, c.startY, c.endY);
+        maxY = Math.max(maxY, c.startY, c.endY);
+      });
+    }
+    const width = maxX - minX;
+    const height = maxY - minY;
+    return { minX, minY, maxX, maxY, width: width || 100, height: height || 100 };
+  }, [pipes, pipeCoords]);
 
   const handleFittingChange = (type: FittingType) => {
     setForm(prev => ({
@@ -151,18 +159,6 @@ const App: React.FC = () => {
 
   const handleZoom = (factor: number) => setZoom(z => Math.max(0.1, Math.min(10, z * factor)));
 
-  const calculateBoundingBox = useCallback(() => {
-    let minX = 0, minY = 0, maxX = 0, maxY = 0;
-    if (pipes.length === 0) return { minX: -50, minY: -50, maxX: 50, maxY: 50, width: 100, height: 100 };
-    pipeCoords.forEach(c => {
-      minX = Math.min(minX, c.startX, c.endX);
-      maxX = Math.max(maxX, c.startX, c.endX);
-      minY = Math.min(minY, c.startY, c.endY);
-      maxY = Math.max(maxY, c.startY, c.endY);
-    });
-    return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
-  }, [pipes, pipeCoords]);
-
   const mainDraw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !containerRef.current) return;
@@ -192,6 +188,50 @@ const App: React.FC = () => {
     return () => cancelAnimationFrame(frameId);
   }, [mainDraw]);
 
+  // Fixed Preview Effect
+  useEffect(() => {
+    if (!showPrintPreview) return;
+
+    const renderPreview = () => {
+      const cvs = previewCanvasRef.current;
+      if (!cvs) return;
+      const ctx = cvs.getContext('2d');
+      if (!ctx) return;
+
+      const baseW = paperSize === 'A4' ? 1123 : 1587;
+      const baseH = paperSize === 'A4' ? 794 : 1123;
+      const w = orientation === 'LANDSCAPE' ? baseW : baseH;
+      const h = orientation === 'LANDSCAPE' ? baseH : baseW;
+      
+      if (cvs.width !== w || cvs.height !== h) {
+        cvs.width = w;
+        cvs.height = h;
+      }
+
+      const box = calculateBoundingBox();
+      const padding = 120;
+      const availableW = w - padding * 2;
+      const availableH = h - padding * 2;
+      const scaleX = availableW / box.width;
+      const scaleY = availableH / box.height;
+      const fitScale = Math.min(scaleX, scaleY, 2.5);
+      
+      const centerX = w / 2 - (box.minX + box.width / 2) * fitScale;
+      const centerY = h / 2 - (box.minY + box.height / 2) * fitScale;
+
+      renderScene({
+        ctx, width: w, height: h, offset: { x: centerX, y: centerY }, scale: fitScale, isExport: true,
+        pipes, pipeCoords, selectedId, hoveredId: null, isMeasureMode: false, measurePoints: [], mousePos: {x:0,y:0}
+      });
+    };
+
+    const timer = setTimeout(() => {
+      requestAnimationFrame(renderPreview);
+    }, 100); // Small delay to ensure modal layout is ready
+
+    return () => clearTimeout(timer);
+  }, [showPrintPreview, paperSize, orientation, pipes, pipeCoords, calculateBoundingBox]);
+
   const handleCanvasClick = (e: React.MouseEvent | React.TouchEvent) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -211,7 +251,7 @@ const App: React.FC = () => {
     if (pipes.length === 0) {
       setViewOffset({ x: clientX - rect.left, y: clientY - rect.top });
       setSelectedId('ROOT');
-      setShowStartHint(false); // Hide hint immediately on click
+      setShowStartHint(false);
       return;
     }
 
@@ -296,7 +336,7 @@ const App: React.FC = () => {
       commitToHistory();
       setPipes([]);
       setSelectedId('ROOT');
-      setShowStartHint(true); // Reset hint for new project
+      setShowStartHint(true);
       showStatus("پروژه جدید ایجاد شد");
       if (isMobile) setIsSidebarOpen(false);
     }
@@ -319,7 +359,6 @@ const App: React.FC = () => {
           reader.readAsText(file);
       }} className="hidden" />
 
-      {/* Sidebar UI */}
       <aside className={`
         ${isMobile 
           ? `fixed inset-x-0 bottom-0 z-[100] bg-white shadow-[0_-10px_40px_rgba(0,0,0,0.15)] rounded-t-[2.5rem] transition-transform duration-500 ease-out transform ${isSidebarOpen ? 'translate-y-0' : 'translate-y-[calc(100%-60px)]'}` 
@@ -346,7 +385,6 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* Step Indicator */}
           <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-4 mb-4 shadow-lg text-white">
             <div className="flex items-center gap-2 text-[10px] font-bold mb-3 border-b border-white/10 pb-2">
               <Sparkles size={14} className="text-blue-400" /> روند طراحی ایزومتریک
@@ -526,7 +564,6 @@ const App: React.FC = () => {
         </footer>
       </aside>
 
-      {/* Main Canvas Area */}
       <main ref={containerRef} className="flex-1 relative bg-slate-100 overflow-hidden touch-none"
         onMouseDown={e => { if (e.button === 1 || e.shiftKey) { setIsDragging(true); setLastMousePos({ x: e.clientX, y: e.clientY }); } }}
         onMouseMove={handleMouseMove}
@@ -564,7 +601,6 @@ const App: React.FC = () => {
           className={`block w-full h-full ${isMeasureMode ? 'cursor-none' : hoveredId ? 'cursor-pointer' : 'cursor-default'}`} 
         />
 
-        {/* High Contrast Mode Banner */}
         <div className="absolute top-6 left-1/2 -translate-x-1/2 w-[90%] md:w-auto z-[20]">
           <div className={`px-6 md:px-10 py-3.5 rounded-full text-[11px] md:text-[13px] font-extrabold shadow-[0_20px_40px_rgba(0,0,0,0.25)] flex items-center justify-center gap-3 border backdrop-blur-xl transition-all duration-500 ring-4 ring-white/10 ${isMeasureMode ? 'bg-amber-600 border-amber-400 text-white scale-105' : 'bg-slate-900 border-slate-700 text-white'}`}>
             <div className={`p-1.5 rounded-lg ${isMeasureMode ? 'bg-amber-700' : 'bg-blue-600 text-white'}`}>
@@ -574,21 +610,18 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Floating Mobile/Desktop Controls */}
         <div className={`absolute left-6 ${isMobile ? 'bottom-24' : 'top-6'} flex flex-col gap-3 z-[10]`}>
           <div className="bg-white/95 backdrop-blur-xl border border-slate-200 p-2 rounded-2xl shadow-2xl flex flex-col gap-2">
             <button onClick={() => handleZoom(1.3)} className="p-3 hover:bg-blue-50 text-slate-700 rounded-xl transition-all active:scale-90"><ZoomIn size={24} /></button>
             <button onClick={() => { if (containerRef.current) setViewOffset({ x: containerRef.current.clientWidth/2, y: containerRef.current.clientHeight/2 }); }} className="p-3 hover:bg-blue-50 text-slate-700 rounded-xl transition-all active:scale-90"><Move size={24} /></button>
             <button onClick={() => handleZoom(0.7)} className="p-3 hover:bg-blue-50 text-slate-700 rounded-xl transition-all active:scale-90"><ZoomOut size={24} /></button>
           </div>
-          
           <div className="bg-white/95 backdrop-blur-xl border border-slate-200 p-2 rounded-2xl shadow-2xl flex flex-col gap-2">
             <button onClick={undo} disabled={history.length === 0} className={`p-3 rounded-xl transition-all ${history.length > 0 ? 'text-slate-800 active:bg-blue-50' : 'text-slate-200'}`}><Undo2 size={24} /></button>
             <button onClick={redo} disabled={redoStack.length === 0} className={`p-3 rounded-xl transition-all ${redoStack.length > 0 ? 'text-slate-800 active:bg-blue-50' : 'text-slate-200'}`}><Redo2 size={24} /></button>
           </div>
         </div>
 
-        {/* Mobile FAB Menu */}
         {isMobile && !isSidebarOpen && (
           <button 
             onClick={() => setIsSidebarOpen(true)}
@@ -598,7 +631,6 @@ const App: React.FC = () => {
           </button>
         )}
 
-        {/* Status Toast */}
         {statusMessage && (
           <div className={`absolute ${isMobile ? 'top-24' : 'bottom-12'} left-1/2 -translate-x-1/2 bg-slate-900/95 text-white px-8 py-3 rounded-2xl text-[12px] font-bold shadow-2xl z-[1000] flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-500 ring-4 ring-white/10`}>
              <CheckCircle size={14} className="text-emerald-400" />
@@ -606,7 +638,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Initial Start Hint Overlay - Refined Size and Dismissible */}
         {pipes.length === 0 && showStartHint && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6">
             <div 
@@ -614,7 +645,7 @@ const App: React.FC = () => {
               onClick={(e) => { 
                 const rect = canvasRef.current?.getBoundingClientRect(); 
                 if (rect) { setViewOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top }); setSelectedId('ROOT'); } 
-                setShowStartHint(false); // Hide on click as well
+                setShowStartHint(false);
               }}
             >
               <div className="p-6 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-3xl shadow-xl ring-[10px] ring-blue-500/10"><Target size={isMobile ? 40 : 54} /></div>
@@ -633,7 +664,6 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Modals */}
       {showPrintPreview && (
         <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-2xl z-[200] flex items-center justify-center p-2 md:p-6">
            <div className="bg-white rounded-[2.5rem] w-full max-w-7xl h-[95vh] md:h-[92vh] shadow-2xl flex flex-col overflow-hidden border border-white/20 animate-in zoom-in-95 duration-500">
@@ -654,8 +684,10 @@ const App: React.FC = () => {
                </div>
                <button onClick={() => setShowPrintPreview(false)} className="absolute top-4 right-4 md:static text-slate-400 p-2 bg-slate-100 rounded-2xl"><X size={28} /></button>
              </div>
-             <div className="flex-1 bg-slate-200/30 p-6 md:p-12 flex items-center justify-center overflow-auto scrollbar-hide">
-               <canvas ref={previewCanvasRef} className="bg-white shadow-2xl border border-slate-200 max-h-full max-w-full object-contain transition-all duration-500" />
+             <div className="flex-1 bg-slate-100 p-6 md:p-12 flex items-center justify-center overflow-hidden">
+               <div className="relative shadow-2xl bg-white p-4 rounded-lg overflow-auto max-h-full max-w-full">
+                <canvas ref={previewCanvasRef} className="bg-white border border-slate-200 shadow-sm" />
+               </div>
              </div>
              <div className="p-8 border-t bg-white flex flex-col md:flex-row justify-end gap-6 items-center">
                <button onClick={() => setShowPrintPreview(false)} className="px-10 py-4 text-[13px] font-bold text-slate-500 hover:text-slate-800 transition-colors">بازگشت</button>
