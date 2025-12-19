@@ -104,9 +104,9 @@ const App: React.FC = () => {
         });
       }
     }
-  }, [selectedId]);
+  }, [selectedId, pipes]);
 
-  // Handle fitting selection logic: if equipment is chosen, default length to 0
+  // Logic: if equipment is chosen, default length to 0 to avoid drawing a pipe line
   const handleFittingChange = (type: FittingType) => {
     setForm(prev => ({
       ...prev,
@@ -183,7 +183,7 @@ const App: React.FC = () => {
       ctx.stroke();
     }
 
-    // Root Point - Persian "شروع" only
+    // Root Point - Updated to just "شروع" as per screenshot request
     ctx.beginPath();
     ctx.arc(0, 0, 8 / scale, 0, Math.PI * 2);
     ctx.fillStyle = CONFIG.COLORS.ROOT;
@@ -227,7 +227,7 @@ const App: React.FC = () => {
         ctx.restore();
       }
 
-      // Draw fitting regardless of pipe length
+      // Draw fitting regardless of pipe length (allows 0-length fittings)
       if (pipe.fitting !== 'NONE') {
         drawFittingSymbol(ctx, pipe.fitting, coords.endX, coords.endY, pipe.direction, scale);
       }
@@ -235,28 +235,29 @@ const App: React.FC = () => {
 
     // Measurement Rendering
     if (!isExport && isMeasureMode && measurePoints.length > 0) {
+      ctx.save();
       ctx.beginPath();
       ctx.strokeStyle = CONFIG.COLORS.MEASURE;
-      ctx.setLineDash([4/scale, 4/scale]);
+      ctx.setLineDash([5/scale, 5/scale]);
       ctx.lineWidth = 2/scale;
       ctx.moveTo(measurePoints[0].x, measurePoints[0].y);
       if (measurePoints.length > 1) {
         ctx.lineTo(measurePoints[1].x, measurePoints[1].y);
         ctx.stroke();
 
-        const pixelDist = Math.hypot(measurePoints[1].x - measurePoints[0].x, measurePoints[1].y - measurePoints[0].y);
-        const cmDist = Math.round(pixelDist / CONFIG.SCALE);
-        
+        const dist = Math.round(Math.hypot(measurePoints[1].x - measurePoints[0].x, measurePoints[1].y - measurePoints[0].y) / CONFIG.SCALE);
         ctx.fillStyle = CONFIG.COLORS.MEASURE;
         ctx.font = `bold ${14/scale}px Vazirmatn`;
         ctx.textAlign = 'center';
-        ctx.fillText(`${cmDist} cm`, (measurePoints[0].x + measurePoints[1].x)/2, (measurePoints[0].y + measurePoints[1].y)/2 - 10/scale);
+        ctx.shadowColor = 'white'; ctx.shadowBlur = 4/scale;
+        ctx.fillText(`${dist} cm`, (measurePoints[0].x + measurePoints[1].x)/2, (measurePoints[0].y + measurePoints[1].y)/2 - 10/scale);
       }
-      ctx.setLineDash([]);
-      
-      // Draw point markers
+      ctx.restore();
+
+      // Markers for points
       measurePoints.forEach(p => {
-        ctx.beginPath(); ctx.arc(p.x, p.y, 4/scale, 0, Math.PI*2); ctx.fillStyle = CONFIG.COLORS.MEASURE; ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, 5/scale, 0, Math.PI*2); ctx.fillStyle = CONFIG.COLORS.MEASURE; ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5/scale; ctx.stroke();
       });
     }
 
@@ -288,16 +289,15 @@ const App: React.FC = () => {
       });
       ctx.restore();
 
-      // Persian Compass (North: ش, South: ج, East: ق, West: غ)
+      // Persian Compass (translated)
       ctx.save();
       const cx = width - 80, cy = height - 80;
       ctx.translate(cx, cy);
-      const s = 30; 
-      const c30 = Math.cos(CONFIG.ISO_ANGLE);
-      const s30 = Math.sin(CONFIG.ISO_ANGLE);
+      const s = 30; const c30 = Math.cos(Math.PI/6), s30 = Math.sin(Math.PI/6);
+      // N=شمال (ش), S=جنوب (ج), E=شرق (ق), W=غرب (غ)
       [[c30,-s30,'ش','#ef4444'],[-c30,s30,'ج','#64748b'],[c30,s30,'ق','#3b82f6'],[-c30,-s30,'غ','#64748b']].forEach(([dx,dy,l,cl]) => {
         ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Number(dx)*s, Number(dy)*s); ctx.strokeStyle = cl as string; ctx.lineWidth=2; ctx.stroke();
-        ctx.fillStyle = cl as string; ctx.font='bold 12px Vazirmatn'; ctx.textAlign = 'center'; ctx.fillText(l as string, Number(dx)*s*1.5, Number(dy)*s*1.5 + 4);
+        ctx.fillStyle = cl as string; ctx.font='bold 11px Vazirmatn'; ctx.textAlign='center'; ctx.fillText(l as string, Number(dx)*s*1.4, Number(dy)*s*1.4 + 4);
       });
       ctx.restore();
     }
@@ -344,9 +344,9 @@ const App: React.FC = () => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
 
-    // Convert mouse pixels to canvas world coordinates
-    const clickX = (e.clientX - rect.left - viewOffset.x) / zoom;
-    const clickY = (e.clientY - rect.top - viewOffset.y) / zoom;
+    // Convert mouse pixels to world coordinates
+    const worldX = (e.clientX - rect.left - viewOffset.x) / zoom;
+    const worldY = (e.clientY - rect.top - viewOffset.y) / zoom;
 
     if (pipes.length === 0) {
       setViewOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top });
@@ -357,17 +357,18 @@ const App: React.FC = () => {
     if (isDragging) return;
 
     if (isMeasureMode) {
-      setMeasurePoints(prev => {
-        if (prev.length >= 2) return [{ x: clickX, y: clickY }];
-        return [...prev, { x: clickX, y: clickY }];
-      });
+      if (measurePoints.length >= 2) {
+        setMeasurePoints([{ x: worldX, y: worldY }]);
+      } else {
+        setMeasurePoints([...measurePoints, { x: worldX, y: worldY }]);
+      }
       return;
     }
 
-    if (Math.hypot(clickX, clickY) < 20/zoom) { setSelectedId('ROOT'); return; }
+    if (Math.hypot(worldX, worldY) < 20/zoom) { setSelectedId('ROOT'); return; }
     let bestId = 'ROOT', minD = 20/zoom;
     for (const [id, c] of pipeCoords.entries()) {
-        const d = getDistanceToSegment(clickX, clickY, c.startX, c.startY, c.endX, c.endY);
+        const d = getDistanceToSegment(worldX, worldY, c.startX, c.startY, c.endX, c.endY);
         if (d < minD) { minD = d; bestId = id; }
     }
     setSelectedId(bestId);
@@ -378,7 +379,7 @@ const App: React.FC = () => {
     const id = Math.random().toString(36).substr(2, 9);
     setPipes(prev => [...prev, { id, parentId: selectedId, ...form }]);
     setSelectedId(id);
-    // If it was a fitting only, keep fitting at NONE for the next segment
+    // After adding equipment with 0 length, reset fitting to NONE for next standard pipe
     if (form.fitting !== 'NONE') {
         setForm(f => ({ ...f, fitting: 'NONE', length: 100 }));
     }
@@ -400,17 +401,17 @@ const App: React.FC = () => {
           reader.readAsText(file);
       }} className="hidden" />
 
+      {/* Sidebar with Updated Name */}
       <aside className="w-64 bg-white border-l border-slate-200 shadow-2xl z-30 flex flex-col h-full shrink-0">
         <header className="p-3 border-b bg-slate-50/50 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-1 bg-blue-600 rounded text-white shadow-sm"><Layers size={14} /></div>
-            <h1 className="text-xs font-bold tracking-tight truncate">SmartGas Pro</h1>
+            <h1 className="text-xs font-bold tracking-tight truncate">ایزو نگار (IsoNegar)</h1>
           </div>
           <button 
             onClick={handleUndo} 
             disabled={history.length === 0} 
             className={`p-1 rounded transition-all border ${history.length > 0 ? 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200' : 'text-slate-200 border-slate-100 cursor-not-allowed'}`}
-            title="Undo"
           >
             <Undo2 size={14} />
           </button>
@@ -490,7 +491,7 @@ const App: React.FC = () => {
                 <button onClick={() => { saveToHistory(); setPipes(prev => prev.map(p => p.id === selectedId ? {...p, ...form} : p)) }} className="w-full py-2 bg-slate-800 text-white rounded text-[10px] font-bold shadow-sm active:scale-95 transition-all">بروزرسانی تغییرات</button>
               )}
               <button onClick={handleAddPipe} className="w-full py-3 bg-blue-600 text-white rounded text-[10px] font-bold shadow-md hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-1">
-                <Plus size={14} /> {form.fitting !== 'NONE' ? 'ثبت تجهیز جدید' : 'ثبت انشعاب جدید'}
+                <Plus size={14} /> {form.fitting !== 'NONE' ? 'ثبت تجهیز' : 'ثبت انشعاب'}
               </button>
               {selectedId !== 'ROOT' && (
                 <button onClick={() => { saveToHistory(); setPipes(prev => prev.filter(p => p.id !== selectedId)); setSelectedId('ROOT'); }} className="w-full py-1 text-red-500 font-bold text-[9px] hover:bg-red-50 rounded transition-all">حذف این بخش</button>
@@ -527,7 +528,12 @@ const App: React.FC = () => {
         }}
         onMouseUp={() => setIsDragging(false)}
       >
-        <canvas ref={canvasRef} onClick={handleCanvasClick} className="block w-full h-full cursor-crosshair" />
+        {/* Improved Cursor for Measurement */}
+        <canvas 
+          ref={canvasRef} 
+          onClick={handleCanvasClick} 
+          className={`block w-full h-full ${isMeasureMode ? 'cursor-crosshair' : 'cursor-default'}`} 
+        />
 
         <div className="absolute top-4 left-4 flex flex-col gap-2">
           <div className="bg-white/90 backdrop-blur border border-slate-200 p-1 rounded shadow-xl flex flex-col gap-1">
@@ -568,9 +574,15 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+
+        {isMeasureMode && (
+          <div className="absolute bottom-4 right-72 bg-amber-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg animate-bounce">
+            {measurePoints.length === 0 ? 'نقطه اول را انتخاب کنید' : measurePoints.length === 1 ? 'نقطه دوم را انتخاب کنید' : 'فاصله اندازه‌گیری شد'}
+          </div>
+        )}
       </main>
 
-      {/* Modals remain same */}
+      {/* Modals remain the same */}
       {showPrintPreview && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-lg z-[200] flex items-center justify-center p-4">
            <div className="bg-white rounded-[1.5rem] w-full max-w-5xl h-[90vh] shadow-2xl flex flex-col overflow-hidden">
