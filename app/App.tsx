@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
-  Plus, ZoomIn, ZoomOut, Move, Target, Ruler, Printer, X, ShieldCheck, Calculator, Undo2, Redo2, Layers, Save, Upload, Loader2, Info, ChevronLeft, CheckCircle, Edit3, MousePointer2, Menu, ChevronUp, ChevronDown, Sparkles
+  Plus, ZoomIn, ZoomOut, Move, Target, Ruler, Printer, X, ShieldCheck, Calculator, Undo2, Redo2, Layers, Save, Upload, Loader2, Info, ChevronLeft, CheckCircle, Edit3, MousePointer2, Menu, ChevronUp, ChevronDown, Sparkles, Trash2, RefreshCcw
 } from 'lucide-react';
 import { Direction, FittingType, InstallationType, Vector2D } from '../domain/types';
 import { CONFIG } from '../domain/constants';
@@ -43,6 +43,9 @@ const App: React.FC = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
 
+  // New state to manage the initial hint visibility
+  const [showStartHint, setShowStartHint] = useState(true);
+
   const [form, setForm] = useState<{ 
     length: number; 
     size: string; 
@@ -73,6 +76,23 @@ const App: React.FC = () => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Timer to dismiss hint
+  useEffect(() => {
+    if (pipes.length === 0 && showStartHint) {
+      const timer = setTimeout(() => {
+        setShowStartHint(false);
+      }, 5000); // 5 seconds display
+      return () => clearTimeout(timer);
+    }
+  }, [pipes.length, showStartHint]);
+
+  // If pipes exist, hint should definitely be gone
+  useEffect(() => {
+    if (pipes.length > 0) {
+      setShowStartHint(false);
+    }
+  }, [pipes.length]);
 
   useEffect(() => {
     if (viewOffset.x === 0 && viewOffset.y === 0 && containerRef.current) {
@@ -191,6 +211,7 @@ const App: React.FC = () => {
     if (pipes.length === 0) {
       setViewOffset({ x: clientX - rect.left, y: clientY - rect.top });
       setSelectedId('ROOT');
+      setShowStartHint(false); // Hide hint immediately on click
       return;
     }
 
@@ -269,6 +290,18 @@ const App: React.FC = () => {
     if (isMobile) setIsSidebarOpen(false);
   };
 
+  const handleNewProject = () => {
+    if (pipes.length === 0) return;
+    if (window.confirm("آیا از شروع ترسیم جدید و پاک کردن پروژه فعلی اطمینان دارید؟")) {
+      commitToHistory();
+      setPipes([]);
+      setSelectedId('ROOT');
+      setShowStartHint(true); // Reset hint for new project
+      showStatus("پروژه جدید ایجاد شد");
+      if (isMobile) setIsSidebarOpen(false);
+    }
+  };
+
   return (
     <div className={`flex h-screen w-full bg-slate-50 text-slate-800 overflow-hidden ${isMobile ? 'flex-col' : 'flex-row'}`} dir="rtl">
       <input type="file" ref={fileInputRef} onChange={(e) => {
@@ -345,12 +378,21 @@ const App: React.FC = () => {
         <div className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-hide">
           {activeTab === 'DRAW' && (
             <>
-              <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-xl shadow-sm">
-                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">گره انتخابی جاری</label>
-                <div className="text-[12px] font-bold text-blue-900 flex items-center gap-2">
-                  <div className={`w-2.5 h-2.5 rounded-full ${selectedId === 'ROOT' ? 'bg-emerald-500' : 'bg-blue-600'} animate-pulse`} />
-                  {selectedId === 'ROOT' ? 'نقطه شروع (ورودی اصلی)' : `انشعاب شماره ${selectedId.slice(0, 4)}`}
+              <div className="flex gap-2">
+                <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-xl shadow-sm flex-1">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">گره انتخابی جاری</label>
+                  <div className="text-[12px] font-bold text-blue-900 flex items-center gap-2">
+                    <div className={`w-2.5 h-2.5 rounded-full ${selectedId === 'ROOT' ? 'bg-emerald-500' : 'bg-blue-600'} animate-pulse`} />
+                    {selectedId === 'ROOT' ? 'نقطه شروع (ورودی اصلی)' : `انشعاب شماره ${selectedId.slice(0, 4)}`}
+                  </div>
                 </div>
+                <button 
+                  onClick={handleNewProject} 
+                  className={`p-3 bg-white border border-slate-200 rounded-xl shadow-sm hover:bg-red-50 hover:text-red-500 hover:border-red-100 transition-all group ${pipes.length === 0 ? 'opacity-30 cursor-not-allowed' : ''}`}
+                  title="ترسیم جدید"
+                >
+                  <RefreshCcw size={18} className="group-active:rotate-180 transition-transform duration-500" />
+                </button>
               </div>
 
               <div className="space-y-5">
@@ -447,10 +489,10 @@ const App: React.FC = () => {
                 <p className="text-[12px] text-emerald-800 leading-relaxed font-extrabold mb-1">هوش مصنوعی مهندسی:</p>
                 <p className="text-[11px] text-emerald-700 leading-relaxed">تحلیل کامل نقشه بر اساس استانداردهای نظام مهندسی مبحث ۱۷.</p>
               </div>
-              <button onClick={() => handleAiAnalysis('SAFETY')} className="w-full py-6 bg-white border-2 border-emerald-100 text-emerald-700 rounded-3xl flex flex-col items-center gap-3 text-[13px] font-extrabold hover:bg-emerald-50 transition-all shadow-lg active:scale-95 group">
+              <button onClick={() => handleAiAnalysis('SAFETY')} className="w-full py-6 bg-white border-2 border-emerald-100 text-emerald-700 rounded-3xl flex flex-col items-center gap-3 text-[13px] font-extrabold hover:bg-emerald-50 shadow-lg active:scale-95 group">
                 <ShieldCheck size={42} className="group-hover:scale-110 transition-transform text-emerald-500" /> بررسی ایمنی و استاندارد
               </button>
-              <button onClick={() => handleAiAnalysis('MTO')} className="w-full py-6 bg-white border-2 border-blue-100 text-blue-700 rounded-3xl flex flex-col items-center gap-3 text-[13px] font-extrabold hover:bg-blue-50 transition-all shadow-lg active:scale-95 group">
+              <button onClick={() => handleAiAnalysis('MTO')} className="w-full py-6 bg-white border-2 border-blue-100 text-blue-700 rounded-3xl flex flex-col items-center gap-3 text-[13px] font-extrabold hover:bg-blue-50 shadow-lg active:scale-95 group">
                 <Calculator size={42} className="group-hover:scale-110 transition-transform text-blue-500" /> لیست متریال و برآورد (MTO)
               </button>
             </div>
@@ -565,13 +607,14 @@ const App: React.FC = () => {
         )}
 
         {/* Initial Start Hint Overlay - Refined Size and Dismissible */}
-        {pipes.length === 0 && (
+        {pipes.length === 0 && showStartHint && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6">
             <div 
               className="bg-white/95 backdrop-blur-2xl p-6 md:p-8 rounded-[2.5rem] border border-white/60 shadow-[0_40px_80px_-15px_rgba(0,0,0,0.15)] flex flex-col items-center gap-5 animate-in zoom-in-95 fade-in duration-700 pointer-events-auto cursor-pointer transition-all hover:scale-105 active:scale-95" 
               onClick={(e) => { 
                 const rect = canvasRef.current?.getBoundingClientRect(); 
                 if (rect) { setViewOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top }); setSelectedId('ROOT'); } 
+                setShowStartHint(false); // Hide on click as well
               }}
             >
               <div className="p-6 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-3xl shadow-xl ring-[10px] ring-blue-500/10"><Target size={isMobile ? 40 : 54} /></div>
