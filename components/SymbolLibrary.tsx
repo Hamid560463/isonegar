@@ -29,10 +29,10 @@ export const drawFittingSymbol = (
   ctx.strokeStyle = CONFIG.COLORS.VALVE;
   ctx.fillStyle = '#fff';
 
+  // --- VALVE DRAWING ---
   if (type.startsWith('VALVE')) {
     ctx.rotate(angle);
     ctx.beginPath();
-    // Body (Butterfly / Globe style)
     ctx.moveTo(0, 0); 
     ctx.lineTo(-7 * S, -4.5 * S); 
     ctx.lineTo(-7 * S, 4.5 * S); 
@@ -44,7 +44,6 @@ export const drawFittingSymbol = (
     ctx.fill(); 
     ctx.stroke();
 
-    // Valve handle indicator
     ctx.beginPath();
     ctx.moveTo(0, 0); ctx.lineTo(0, -9 * S);
     ctx.moveTo(-3 * S, -9 * S); ctx.lineTo(3 * S, -9 * S);
@@ -64,7 +63,7 @@ export const drawFittingSymbol = (
       default: labelText = 'V';
     }
     
-    ctx.rotate(-angle); // Keep label text upright
+    ctx.rotate(-angle); 
     ctx.fillStyle = CONFIG.COLORS.VALVE;
     ctx.font = `bold ${9 * S}px sans-serif`;
     ctx.textAlign = 'left';
@@ -75,11 +74,11 @@ export const drawFittingSymbol = (
 
   ctx.rotate(angle);
 
+  // --- OTHER FITTINGS ---
   switch (type) {
     case 'METER':
     case 'REGULATOR':
       ctx.rotate(-angle);
-      // Background circle for better contrast against the pipe line
       ctx.beginPath();
       ctx.arc(0, -5 * S, 10 * S, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
@@ -87,7 +86,6 @@ export const drawFittingSymbol = (
       ctx.strokeStyle = CONFIG.COLORS.EQUIPMENT_TEXT;
       ctx.lineWidth = 1 / zoom;
       ctx.stroke();
-
       ctx.fillStyle = CONFIG.COLORS.EQUIPMENT_TEXT;
       ctx.textAlign = 'center'; 
       ctx.textBaseline = 'middle';
@@ -117,6 +115,33 @@ export const drawFittingSymbol = (
       ctx.beginPath();
       ctx.moveTo(0, -6 * S); ctx.lineTo(0, 6 * S);
       ctx.lineWidth = 4 / zoom;
+      ctx.stroke();
+      break;
+
+    case 'ELBOW45':
+      ctx.beginPath();
+      ctx.moveTo(-5 * S, -5 * S); ctx.lineTo(5 * S, 5 * S);
+      ctx.strokeStyle = '#000';
+      ctx.stroke();
+      break;
+
+    case 'COUPLING':
+      ctx.beginPath();
+      ctx.rect(-6 * S, -4 * S, 12 * S, 8 * S);
+      ctx.fillStyle = '#fff'; ctx.fill();
+      ctx.stroke();
+      break;
+
+    case 'NIPPLE':
+      ctx.beginPath();
+      ctx.moveTo(-4 * S, -6 * S); ctx.lineTo(4 * S, -6 * S);
+      ctx.moveTo(-4 * S, 6 * S); ctx.lineTo(4 * S, 6 * S);
+      ctx.stroke();
+      break;
+
+    case 'FLANGE':
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 10 * S, 3 * S, 0, 0, Math.PI * 2);
       ctx.stroke();
       break;
       
